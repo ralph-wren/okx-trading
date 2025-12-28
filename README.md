@@ -2,8 +2,10 @@
 
 ## 🎯 项目概述
 
-OKX Trading是一款基于Java Spring Boot开发的智能加密货币交易策略回测系统，集成了策略实盘交易、AI策略生成、历史数据回测、策略评价等功能。使用[cryptoquantx](https://github.com/ralph-wren/cryptoquantx)作为前端平台。
+OKX Trading是一款基于Java Spring Boot开发的智能加密货币交易策略回测系统，集成了策略实盘交易、AI策略生成、历史数据回测、策略评价等功能。
+> 使用[cryptoquantx](https://github.com/ralph-wren/cryptoquantx)作为前端平台。
 
+> 个人博客地址 [Ralph's Blog](https://pothos.dpdns.org/)
 ## 🚀 核心功能
 
 ### 📈 实盘自动交易系统
