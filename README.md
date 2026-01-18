@@ -417,8 +417,10 @@ mysql -u root -p okx_trading < src/main/resources/migration_add_risk_indicators.
 ## 赞助
 免费使用，欢迎交流，喜欢可以支持一下作者
 
-![alt text](assets/README/c5a8a4befdc92ff6026787ab8a8a40c1.jpg)
 
+<div align="center">
+<img src="assets/README/c5a8a4befdc92ff6026787ab8a8a40c1.jpg" alt="替代文本" style="width: 30%; height: auto;">
+</div>
 ---
 
 如需更详细的实盘交易和通知配置说明，请参考项目Wiki或联系维护者。
