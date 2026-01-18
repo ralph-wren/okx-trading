@@ -5,7 +5,13 @@
 OKX Trading是一款基于Java Spring Boot开发的智能加密货币交易策略回测系统，集成了策略实盘交易、AI策略生成、历史数据回测、策略评价等功能。
 > 使用[cryptoquantx](https://github.com/ralph-wren/cryptoquantx)作为前端平台。
 
-> 个人博客地址 [Ralph's Blog](https://pothos.dpdns.org/)
+> [欧意账号注册](https://www.nqfaonrusoa.com/join/37501020)
+
+> [欧意API获取](https://www.okx.com/zh-hans/okx-api)
+
+> [注册模型中转平台，可以切换其他大模型生成策略代码，目前默认DeepSeek](https://api.apiyi.com/register/?aff_code=5EoZ)
+
+> [个人博客地址 Ralph's Blog](https://pothos.dpdns.org/)
 ## 🚀 核心功能
 
 ### 📈 实盘自动交易系统
@@ -407,6 +413,11 @@ mysql -u root -p okx_trading < src/main/resources/migration_add_risk_indicators.
 1. 提交GitHub Issue
 2. 查看项目Wiki
 3. 联系项目维护者ralph_jungle@163.com
+
+## 赞助
+免费使用，欢迎交流，喜欢可以支持一下作者
+
+![alt text](assets/README/c5a8a4befdc92ff6026787ab8a8a40c1.jpg)
 
 ---
 
