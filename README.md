@@ -414,17 +414,28 @@ mysql -u root -p okx_trading < src/main/resources/migration_add_risk_indicators.
 2. 查看项目Wiki
 3. 联系项目维护者ralph_jungle@163.com
 
-## 赞助
+## ☕ 赞助
 免费使用，欢迎交流，喜欢可以支持一下作者
 
 
 <div align="center">
 <img src="assets/README/c5a8a4befdc92ff6026787ab8a8a40c1.jpg" alt="替代文本" style="width: 30%; height: auto;">
 </div>
----
 
-如需更详细的实盘交易和通知配置说明，请参考项目Wiki或联系维护者。
 
----
+## ⭐ Star History
 
-**OKX智能交易策略回测系统** - 让量化交易更智能，让策略开发更简单！
+<p align="center">
+  <a href="https://star-history.com/#ralph-wren/okx-trading">
+    <img
+      src="https://api.star-history.com/svg?repos=ralph-wren/okx-trading&type=Date"
+      alt="Star History Chart"
+    />
+  </a>
+</p>
+
+
+
+
+
+
