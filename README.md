@@ -425,14 +425,7 @@ mysql -u root -p okx_trading < src/main/resources/migration_add_risk_indicators.
 
 ## ⭐ Star History
 
-<p align="center">
-  <a href="https://star-history.com/#ralph-wren/okx-trading">
-    <img
-      src="https://api.star-history.com/svg?repos=ralph-wren/okx-trading&type=Date"
-      alt="Star History Chart"
-    />
-  </a>
-</p>
+[![Star History Chart](https://api.star-history.com/svg?repos=ralph-wren/okx-trading&type=date&legend=top-left)](https://www.star-history.com/#ralph-wren/okx-trading&type=date&legend=top-left)
 
 
 
