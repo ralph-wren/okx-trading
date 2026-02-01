@@ -1,5 +1,6 @@
 package com.okx.trading.controller;
 
+import com.okx.trading.model.dto.TelegramChannelDTO;
 import com.okx.trading.model.entity.TelegramChannelEntity;
 import com.okx.trading.model.entity.TelegramMessageEntity;
 import com.okx.trading.repository.TelegramChannelRepository;
@@ -54,13 +55,28 @@ public class TelegramController {
         return telegramScraperService.getAllChannels();
     }
 
+    @GetMapping("/search")
+    public List<TelegramChannelDTO> searchChannels(@RequestParam String query) {
+        return telegramScraperService.searchChannels(query);
+    }
+
     @PostMapping("/channels")
-    public void addChannel(@RequestParam String channelName) {
-        telegramScraperService.addChannel(channelName);
+    public void addChannel(
+            @RequestParam String channelName,
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) Long subscribers,
+            @RequestParam(required = false) String avatarUrl
+    ) {
+        telegramScraperService.addChannel(channelName, title, subscribers, avatarUrl);
     }
 
     @DeleteMapping("/channels")
     public void removeChannel(@RequestParam String channelName) {
         telegramScraperService.removeChannel(channelName);
+    }
+
+    @PostMapping("/refresh")
+    public void refresh() {
+        telegramScraperService.scrapeChannels();
     }
 }

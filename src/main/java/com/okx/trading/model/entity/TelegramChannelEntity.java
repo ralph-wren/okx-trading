@@ -14,6 +14,12 @@ public class TelegramChannelEntity {
     @Column(unique = true, nullable = false)
     private String channelName;
 
+    private String title;
+    
+    private Long subscribers;
+    
+    private String avatarUrl;
+
     private String description;
 
     private boolean isActive = true;

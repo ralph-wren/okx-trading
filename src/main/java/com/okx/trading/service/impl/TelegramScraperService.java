@@ -3,6 +3,7 @@ package com.okx.trading.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.okx.trading.model.dto.TelegramChannelDTO;
 import com.okx.trading.model.entity.TelegramChannelEntity;
 import com.okx.trading.model.entity.TelegramMessageEntity;
 import com.okx.trading.repository.TelegramChannelRepository;
@@ -20,10 +21,13 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -57,19 +61,26 @@ public class TelegramScraperService {
         if (telegramChannelRepository.count() == 0) {
             for (String channelName : defaultChannels) {
                 if (!telegramChannelRepository.existsByChannelName(channelName)) {
-                    addChannel(channelName);
+                    addChannel(channelName, null, null, null);
                 }
             }
         }
     }
 
     public void addChannel(String channelName) {
+        addChannel(channelName, null, null, null);
+    }
+
+    public void addChannel(String channelName, String title, Long subscribers, String avatarUrl) {
         if (!telegramChannelRepository.existsByChannelName(channelName)) {
             TelegramChannelEntity entity = new TelegramChannelEntity();
             entity.setChannelName(channelName);
+            entity.setTitle(title != null ? title : channelName);
+            entity.setSubscribers(subscribers);
+            entity.setAvatarUrl(avatarUrl);
             entity.setActive(true);
             telegramChannelRepository.save(entity);
-            log.info("Added new channel: {}", channelName);
+            log.info("Added new channel: {} ({})", channelName, title);
         }
     }
 
@@ -82,6 +93,59 @@ public class TelegramScraperService {
 
     public List<TelegramChannelEntity> getAllChannels() {
         return telegramChannelRepository.findAll();
+    }
+
+    public List<TelegramChannelDTO> searchChannels(String query) {
+        List<TelegramChannelDTO> results = new ArrayList<>();
+        try {
+            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.toString());
+            String url = "https://telesou.com/api/search?q=" + encodedQuery;
+            
+            Connection connect = Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    .header("Referer", "https://telesou.com/")
+                    .ignoreContentType(true)
+                    .timeout(10000);
+            
+            // Telesou API returns JSON
+            String jsonBody = connect.execute().body();
+            JSONObject response = JSON.parseObject(jsonBody);
+            
+            if (response != null && response.getInteger("code") == 0) {
+                JSONObject data = response.getJSONObject("data");
+                if (data != null) {
+                    JSONArray items = data.getJSONArray("items");
+                    if (items != null) {
+                        for (int i = 0; i < items.size(); i++) {
+                            JSONObject item = items.getJSONObject(i);
+                            TelegramChannelDTO dto = new TelegramChannelDTO();
+                            
+                            String handle = item.getString("handle"); // e.g. @jinse2017
+                            if (handle != null && handle.startsWith("@")) {
+                                handle = handle.substring(1);
+                            }
+                            
+                            dto.setName(handle);
+                            dto.setTitle(item.getString("name"));
+                            dto.setSubscribers(item.getLong("subscriber_count"));
+                            
+                            String icon = item.getString("icon_url");
+                            if (icon != null && icon.startsWith("/")) {
+                                dto.setAvatarUrl("https://telesou.com" + icon);
+                            } else {
+                                dto.setAvatarUrl(icon);
+                            }
+                            
+                            dto.setDescription(item.getString("description"));
+                            results.add(dto);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to search channels via telesou: {}", query, e);
+        }
+        return results;
     }
 
     @Scheduled(fixedRate = 60000) // Run every minute
@@ -191,6 +255,50 @@ public class TelegramScraperService {
             }
 
             Document doc = connect.get();
+
+            // Try to extract Channel Title and Subscribers if missing in DB
+            try {
+                TelegramChannelEntity channelEntity = telegramChannelRepository.findByChannelName(channelName).orElse(null);
+                if (channelEntity != null) {
+                    boolean updated = false;
+                    
+                    // Update Title
+                    if (channelEntity.getTitle() == null || channelEntity.getTitle().isEmpty() || channelEntity.getTitle().equals(channelName)) {
+                        String pageTitle = doc.select("meta[property=og:title]").attr("content");
+                        if (pageTitle != null && !pageTitle.isEmpty()) {
+                            channelEntity.setTitle(pageTitle);
+                            updated = true;
+                        }
+                    }
+                    
+                    // Update Avatar
+                    if (channelEntity.getAvatarUrl() == null || channelEntity.getAvatarUrl().isEmpty()) {
+                        String image = doc.select("meta[property=og:image]").attr("content");
+                        if (image != null && !image.isEmpty()) {
+                            channelEntity.setAvatarUrl(image);
+                            updated = true;
+                        }
+                    }
+                    
+                    // Update Subscribers (Roughly from description or extra info if available)
+                    // Telegram web view shows "X subscribers" in .tgme_page_extra
+                    Element extraInfo = doc.selectFirst(".tgme_page_extra");
+                    if (extraInfo != null) {
+                        String extraText = extraInfo.text(); // e.g. "1.2K subscribers"
+                        if (extraText.contains("subscribers")) {
+                            String subStr = extraText.replace("subscribers", "").trim();
+                            // Parse K/M suffixes... simplification for now
+                            // Maybe not strictly necessary if we get it from search
+                        }
+                    }
+
+                    if (updated) {
+                        telegramChannelRepository.save(channelEntity);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to update channel metadata for {}", channelName);
+            }
 
             Elements messages = doc.select(".tgme_widget_message_wrap");
             
