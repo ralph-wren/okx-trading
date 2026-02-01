@@ -7,12 +7,16 @@ import com.okx.trading.repository.TelegramChannelRepository;
 import com.okx.trading.repository.TelegramMessageRepository;
 import com.okx.trading.service.impl.TelegramScraperService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -43,7 +47,8 @@ public class TelegramController {
         log.info("Fetching messages for active channels: {}", activeChannels);
 
         if (activeChannels.isEmpty()) {
-            return Page.empty();
+            PageRequest pageable = PageRequest.of(0, Integer.MAX_VALUE);
+            return new PageImpl<>(Arrays.asList(), pageable, 0);
         }
 
         Pageable pageable = PageRequest.of(page, size);
