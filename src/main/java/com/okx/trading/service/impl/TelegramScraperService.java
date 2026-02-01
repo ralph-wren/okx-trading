@@ -363,5 +363,102 @@ public class TelegramScraperService {
         } catch (IOException e) {
             log.error("Failed to connect to Telegram channel: {}", channelName, e);
         }
+        
+        // Try to update metadata from search if avatar is missing
+        updateChannelMetadataFromSearch(channelName);
+    }
+
+    private void updateChannelMetadataFromSearch(String channelName) {
+        TelegramChannelEntity channelEntity = telegramChannelRepository.findByChannelName(channelName).orElse(null);
+        if (channelEntity == null) return;
+
+        // If we already have avatar, no need to search
+        if (channelEntity.getAvatarUrl() != null && !channelEntity.getAvatarUrl().isEmpty()) {
+            return;
+        }
+
+        boolean updated = false;
+
+        // 1. Try Telesou Search
+        try {
+            List<TelegramChannelDTO> results = searchChannels(channelName);
+            if (results != null && !results.isEmpty()) {
+                // Find exact match or use the first one if it looks relevant
+                TelegramChannelDTO match = results.stream()
+                        .filter(dto -> channelName.equalsIgnoreCase(dto.getName()))
+                        .findFirst()
+                        .orElse(null);
+
+                if (match == null && !results.isEmpty()) {
+                    // Fallback to first result if name matches loosely
+                    TelegramChannelDTO first = results.get(0);
+                    if (first.getName() != null && first.getName().toLowerCase().contains(channelName.toLowerCase())) {
+                        match = first;
+                    }
+                }
+
+                if (match != null) {
+                    if ((channelEntity.getTitle() == null || channelEntity.getTitle().isEmpty() || channelEntity.getTitle().equals(channelName))
+                            && match.getTitle() != null) {
+                        channelEntity.setTitle(match.getTitle());
+                        updated = true;
+                    }
+                    if ((channelEntity.getAvatarUrl() == null || channelEntity.getAvatarUrl().isEmpty())
+                            && match.getAvatarUrl() != null) {
+                        channelEntity.setAvatarUrl(match.getAvatarUrl());
+                        updated = true;
+                    }
+                    if (channelEntity.getSubscribers() == null && match.getSubscribers() != null) {
+                        channelEntity.setSubscribers(match.getSubscribers());
+                        updated = true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to update metadata from search for {}", channelName, e);
+        }
+
+        // 2. If still no avatar, try TgStat
+        if (!updated || channelEntity.getAvatarUrl() == null || channelEntity.getAvatarUrl().isEmpty()) {
+            String avatar = searchAvatarFromTgStat(channelName);
+            if (avatar != null && !avatar.isEmpty()) {
+                channelEntity.setAvatarUrl(avatar);
+                updated = true;
+            }
+        }
+
+        if (updated) {
+            telegramChannelRepository.save(channelEntity);
+            log.info("Updated channel metadata for: {}", channelName);
+        }
+    }
+
+    private String searchAvatarFromTgStat(String channelName) {
+        String url = "https://tgstat.com/channel/@" + channelName;
+        try {
+            Connection connect = Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    .timeout(10000)
+                    .ignoreContentType(true);
+
+            if (proxyEnabled) {
+                connect.proxy(proxyHost, proxyPort);
+            }
+
+            Document doc = connect.get();
+            Element img = doc.selectFirst("img.img-thumbnail");
+            if (img != null) {
+                String src = img.attr("src");
+                if (src != null && !src.isEmpty()) {
+                    if (src.startsWith("//")) {
+                        src = "https:" + src;
+                    }
+                    return src;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to scrape tgstat for {}", channelName);
+        }
+        return null;
     }
 }
