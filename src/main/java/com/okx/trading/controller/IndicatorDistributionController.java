@@ -54,18 +54,28 @@ public class IndicatorDistributionController {
     }
 
     /**
-     * 获取当前指标分布详情
+     * 获取当前指标分布详情 (支持分页和过滤)
      */
     @GetMapping("/current")
     @Operation(summary = "获取当前指标分布详情")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentDistributions() {
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getCurrentDistributions(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "15") int size,
+            @RequestParam(required = false) String searchTerm,
+            @RequestParam(required = false) String filterType) {
         try {
-            Map<String, IndicatorDistributionEntity> currentDistributions = indicatorDistributionService.getCurrentDistributions();
+            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size, 
+                org.springframework.data.domain.Sort.by("indicatorType").ascending().and(org.springframework.data.domain.Sort.by("indicatorDisplayName").ascending()));
+            
+            org.springframework.data.domain.Page<IndicatorDistributionEntity> distributionPage = 
+                indicatorDistributionService.getCurrentDistributions(searchTerm, filterType, pageable);
 
             Map<String, Object> result = ImmutableMap.of(
-                    "totalCount", currentDistributions.size(),
-                    "indicators", currentDistributions.keySet(),
-                    "indicatorDetails", currentDistributions.values().stream()
+                    "totalCount", distributionPage.getTotalElements(),
+                    "totalPages", distributionPage.getTotalPages(),
+                    "currentPage", distributionPage.getNumber(),
+                    "pageSize", distributionPage.getSize(),
+                    "indicatorDetails", distributionPage.getContent().stream()
                             .map(dist -> ImmutableMap.of(
                                     "name", dist.getIndicatorName(),
                                     "displayName", dist.getIndicatorDisplayName(),
@@ -87,7 +97,7 @@ public class IndicatorDistributionController {
                                             .put("p80", dist.getP80())
                                             .put("p90", dist.getP90())
                                             .build()
-                            ))
+                                    ))
                             .collect(java.util.stream.Collectors.toList())
             );
 

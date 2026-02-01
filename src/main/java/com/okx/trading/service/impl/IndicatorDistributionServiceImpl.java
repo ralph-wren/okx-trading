@@ -333,6 +333,24 @@ public class IndicatorDistributionServiceImpl implements IndicatorDistributionSe
     }
 
     @Override
+    public org.springframework.data.domain.Page<IndicatorDistributionEntity> getCurrentDistributions(
+            String searchTerm, String filterType, org.springframework.data.domain.Pageable pageable) {
+        
+        IndicatorDistributionEntity.IndicatorType type = null;
+        if (filterType != null && !filterType.equalsIgnoreCase("all")) {
+            try {
+                type = IndicatorDistributionEntity.IndicatorType.valueOf(filterType.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("无效的指标类型: {}", filterType);
+            }
+        }
+        
+        String search = (searchTerm != null && !searchTerm.trim().isEmpty()) ? searchTerm.trim() : null;
+        
+        return indicatorDistributionRepository.findCurrentWithFilters(search, type, pageable);
+    }
+
+    @Override
     public double calculateIndicatorScore(String indicatorName, BigDecimal value) {
         Optional<IndicatorDistributionEntity> distributionOpt =
                 indicatorDistributionRepository.findByIndicatorNameAndIsCurrentTrue(indicatorName);

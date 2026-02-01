@@ -1,6 +1,8 @@
 package com.okx.trading.repository;
 
 import com.okx.trading.model.entity.IndicatorDistributionEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -20,6 +22,17 @@ public interface IndicatorDistributionRepository extends JpaRepository<Indicator
      * 查询所有当前版本的指标分布
      */
     List<IndicatorDistributionEntity> findByIsCurrentTrue();
+
+    /**
+     * 分页查询当前版本的指标分布
+     */
+    @Query("SELECT i FROM IndicatorDistributionEntity i WHERE i.isCurrent = true " +
+           "AND (:searchTerm IS NULL OR i.indicatorName LIKE %:searchTerm% OR i.indicatorDisplayName LIKE %:searchTerm%) " +
+           "AND (:indicatorType IS NULL OR i.indicatorType = :indicatorType)")
+    Page<IndicatorDistributionEntity> findCurrentWithFilters(
+            @Param("searchTerm") String searchTerm,
+            @Param("indicatorType") IndicatorDistributionEntity.IndicatorType indicatorType,
+            Pageable pageable);
 
     /**
      * 根据指标名称查询当前版本的分布
@@ -68,4 +81,4 @@ public interface IndicatorDistributionRepository extends JpaRepository<Indicator
      */
     @Query("SELECT COUNT(*) FROM IndicatorDistributionEntity WHERE isCurrent = true")
     Long countCurrentIndicators();
-} 
+}

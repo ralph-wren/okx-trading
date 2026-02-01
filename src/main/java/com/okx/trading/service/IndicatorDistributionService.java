@@ -1,6 +1,8 @@
 package com.okx.trading.service;
 
 import com.okx.trading.model.entity.IndicatorDistributionEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -26,6 +28,17 @@ public interface IndicatorDistributionService {
      * @return 当前版本的指标分布Map，key为指标名称
      */
     Map<String, IndicatorDistributionEntity> getCurrentDistributions();
+
+    /**
+     * 分页获取当前版本的指标分布
+     * 
+     * @param searchTerm 搜索关键词
+     * @param filterType 指标类型
+     * @param pageable 分页参数
+     * @return 分页结果
+     */
+    Page<IndicatorDistributionEntity> getCurrentDistributions(
+            String searchTerm, String filterType, Pageable pageable);
 
     /**
      * 根据指标名称和值计算评分
@@ -66,4 +79,4 @@ public interface IndicatorDistributionService {
      * @return 历史分布数据
      */
     List<IndicatorDistributionEntity> getIndicatorHistory(String indicatorName);
-} 
+}
