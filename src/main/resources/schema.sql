@@ -204,6 +204,7 @@ create table real_time_orders
  symbol          varchar(20)     not null,
  status          varchar(20)     null,
  create_time     datetime(6)     not null,
+ singal_time     datetime(6)     not null,
  update_time     datetime(6)     null);
 
 create index real_time_orders_client_order_id_index on real_time_orders (client_order_id);
@@ -235,15 +236,22 @@ create table real_time_strategy
  successful_trades   int          null,
  is_active           tinyint(1)   null,
  status              varchar(20)  null,
- message             varchar(255) null,
+ error_message       text collate utf8mb4_unicode_ci null,
  start_time          datetime(6)  not null,
  end_time            datetime(6)  null,
  create_time         datetime(6)  not null,
- update_time         datetime(6)  not null);
+ update_time         datetime(6)  not null,
+ constraint UK_strategy_code unique (strategy_code));
 
 create index idx_real_time_strategy_symbol_trade_type on real_time_strategy (symbol, last_trade_type);
 
 create index idx_real_time_strategy_trade_type on real_time_strategy (last_trade_type);
+
+create index idx_real_time_strategy_status on real_time_strategy (status);
+
+create index idx_real_time_strategy_is_active on real_time_strategy (is_active);
+
+create index idx_real_time_strategy_create_time on real_time_strategy (create_time);
 
 create table strategy_conversation
 (id                bigint auto_increment primary key,
@@ -254,20 +262,55 @@ create table strategy_conversation
  user_input        text collate utf8mb4_unicode_ci null,
  compile_error     text collate utf8mb4_unicode_ci null);
 
+create index idx_strategy_conversation_strategy_id on strategy_conversation (strategy_id);
+
+create index idx_strategy_conversation_type on strategy_conversation (conversation_type);
+
+create table telegram_channels
+(id           bigint auto_increment primary key,
+ channel_name varchar(255) not null,
+ title        varchar(255) null,
+ subscribers  bigint       null,
+ avatar_url   varchar(500) null,
+ description  text collate utf8mb4_unicode_ci null,
+ is_active    tinyint(1) default 1 not null,
+ constraint UK_telegram_channel_name unique (channel_name));
+
+create index idx_telegram_channels_is_active on telegram_channels (is_active);
+
+create table telegram_messages
+(id           bigint auto_increment primary key,
+ chat_id      bigint       null,
+ chat_title   varchar(255) null,
+ message_id   int          null,
+ text         text collate utf8mb4_unicode_ci null,
+ sender_name  varchar(255) null,
+ sender_username varchar(255) null,
+ received_at  datetime(6)  null,
+ message_date datetime(6)  null);
+
+create index idx_telegram_messages_chat_id on telegram_messages (chat_id);
+
+create index idx_telegram_messages_received_at on telegram_messages (received_at);
+
+create index idx_telegram_messages_message_date on telegram_messages (message_date);
+
 create table strategy_info
 (id             bigint auto_increment primary key,
- category       varchar(255)                    null,
+ category       varchar(50) collate utf8mb4_unicode_ci null,
  create_time    datetime                        not null,
- default_params varchar(255)                    null,
+ default_params varchar(255) collate utf8mb4_unicode_ci null,
  description    text collate utf8mb4_unicode_ci null,
  comments       text collate utf8mb4_unicode_ci null,
  params_desc    text collate utf8mb4_unicode_ci null,
- strategy_code  varchar(255)                    not null,
- strategy_name  varchar(255)                    not null,
+ strategy_code  varchar(50)                     not null,
+ strategy_name  varchar(100) collate utf8mb4_unicode_ci not null,
  update_time    datetime                        not null,
  source_code    text                            null,
  load_error     text collate utf8mb4_unicode_ci null,
  constraint UK_2n6paqskn3ck3x2f18i56esxp unique (strategy_code));
+
+create index idx_strategy_info_category on strategy_info (category);
 
 create table trades
 (id           bigint auto_increment primary key,
