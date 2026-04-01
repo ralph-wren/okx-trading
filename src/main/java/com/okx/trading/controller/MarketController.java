@@ -61,17 +61,21 @@ public class MarketController {
     private final RedisCacheService redisCacheService;
     private final KlineCacheService klineCacheService;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final com.okx.trading.service.TushareApiService tushareApiService;
 
     @Autowired
     public MarketController(OkxApiService okxApiService,
                             HistoricalDataService historicalDataService,
                             RedisCacheService redisCacheService,
-                            KlineCacheService klineCacheService, RedisTemplate<String, Object> redisTemplate) {
+                            KlineCacheService klineCacheService, 
+                            RedisTemplate<String, Object> redisTemplate,
+                            com.okx.trading.service.TushareApiService tushareApiService) {
         this.okxApiService = okxApiService;
         this.historicalDataService = historicalDataService;
         this.redisCacheService = redisCacheService;
         this.klineCacheService = klineCacheService;
         this.redisTemplate = redisTemplate;
+        this.tushareApiService = tushareApiService;
     }
 
     // 判断是否为开发环境，用于控制日志详细程度
@@ -281,13 +285,58 @@ public class MarketController {
             @NotBlank(message = "结束时间不能为空") @RequestParam String endTimeStr) {
 
         try {
-            List<CandlestickEntity> candlestickEntities = historicalDataService.fetchAndSaveHistoryWithIntegrityCheck(symbol, interval, startTimeStr, endTimeStr);
-            return ApiResponse.success(candlestickEntities);
+            // 判断是否为股票代码（格式：XXXXXX.SZ 或 XXXXXX.SH）
+            boolean isStock = symbol.matches("^\\d{6}\\.(SZ|SH)$");
+            
+            if (isStock) {
+                // 股票：调用Tushare API
+                log.info("检测到股票代码: {}, 使用Tushare API获取数据", symbol);
+                
+                // 将时间字符串转换为时间戳（毫秒）
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                long startTime = LocalDateTime.parse(startTimeStr, formatter)
+                        .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+                long endTime = LocalDateTime.parse(endTimeStr, formatter)
+                        .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+                
+                // 调用Tushare API获取股票数据
+                List<Candlestick> stockData = tushareApiService.getHistoryKlineData(
+                        symbol, interval, startTime, endTime, 5000);
+                
+                // 转换为CandlestickEntity
+                List<CandlestickEntity> entities = stockData.stream()
+                        .map(this::convertToEntity)
+                        .collect(Collectors.toList());
+                
+                return ApiResponse.success(entities);
+            } else {
+                // 加密货币：使用原有逻辑
+                List<CandlestickEntity> candlestickEntities = historicalDataService
+                        .fetchAndSaveHistoryWithIntegrityCheck(symbol, interval, startTimeStr, endTimeStr);
+                return ApiResponse.success(candlestickEntities);
+            }
         } catch (Exception e) {
             log.error("❌ 智能获取历史K线数据失败: {}", e.getMessage(), e);
             return ApiResponse.error(500, "获取历史K线数据失败: " + e.getMessage());
         }
-
+    }
+    
+    /**
+     * 将Candlestick转换为CandlestickEntity
+     */
+    private CandlestickEntity convertToEntity(Candlestick candlestick) {
+        CandlestickEntity entity = new CandlestickEntity();
+        entity.setSymbol(candlestick.getSymbol());
+        entity.setIntervalVal(candlestick.getIntervalVal());
+        entity.setOpenTime(candlestick.getOpenTime());
+        entity.setCloseTime(candlestick.getCloseTime());
+        entity.setOpen(candlestick.getOpen());
+        entity.setHigh(candlestick.getHigh());
+        entity.setLow(candlestick.getLow());
+        entity.setClose(candlestick.getClose());
+        entity.setVolume(candlestick.getVolume());
+        entity.setQuoteVolume(candlestick.getQuoteVolume());
+        return entity;
     }
 
     /**
