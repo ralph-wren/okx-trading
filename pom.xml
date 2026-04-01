@@ -111,6 +111,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Spring Boot Configuration Processor -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- API Documentation -->
         <dependency>
             <groupId>org.springdoc</groupId>

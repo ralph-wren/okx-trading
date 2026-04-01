@@ -49,6 +49,7 @@ public class HistoricalDataServiceImpl implements HistoricalDataService {
     private final ExecutorService batchExecutorService;
     // 注入历史数据查询线程池
     private final ExecutorService historicalDataExecutorService;
+    private final com.okx.trading.service.TushareApiService tushareApiService;
 
     @Value("${okx.historical-data.batch-size:100}")
     private int batchSize = 100;
@@ -85,13 +86,16 @@ public class HistoricalDataServiceImpl implements HistoricalDataService {
                                      @Qualifier("historicalDataExecutorService") ExecutorService executorService,
                                      @Qualifier("batchHistoricalDataExecutorService") ExecutorService batchExecutorService,
                                      @Qualifier("historicalDataExecutorService")
-                                     ExecutorService historicalDataExecutorService, CandlestickBarSeriesConverter barSeriesConverter) {
+                                     ExecutorService historicalDataExecutorService, 
+                                     CandlestickBarSeriesConverter barSeriesConverter,
+                                     @Lazy com.okx.trading.service.TushareApiService tushareApiService) {
         this.okxApiService = okxApiService;
         this.candlestickRepository = candlestickRepository;
         this.executorService = executorService;
         this.batchExecutorService = batchExecutorService;
         this.historicalDataExecutorService = historicalDataExecutorService;
         this.barSeriesConverter = barSeriesConverter;
+        this.tushareApiService = tushareApiService;
     }
 
     @Override
@@ -1237,27 +1241,49 @@ public class HistoricalDataServiceImpl implements HistoricalDataService {
         LocalDateTime currentStart = startTime;
         int batchCount = 0;
 
+        // 判断是否为股票代码（格式：XXXXXX.SZ 或 XXXXXX.SH）
+        boolean isStock = symbol.matches("^\\d{6}\\.(SZ|SH)$");
+
         // 准备所有批次的任务
         // 调用API获取数据 (将LocalDateTime转换为时间戳)
         ZoneId zoneId = ZoneId.of("UTC+8");
         long startTimestamp = startTime.atZone(zoneId).toInstant().toEpochMilli();
         long endTimestamp = endTime.atZone(zoneId).toInstant().toEpochMilli();
         LocalDateTime lastStart = LocalDateTime.now();
+        
         if (startTimestamp == endTimestamp) {
-            List<Candlestick> apiData = okxApiService.getHistoryKlineData(symbol, interval, startTimestamp, endTimestamp, batchSize);
+            List<Candlestick> apiData;
+            if (isStock) {
+                // 股票：调用Tushare API
+                log.info("检测到股票代码: {}, 使用Tushare API获取数据", symbol);
+                apiData = tushareApiService.getHistoryKlineData(symbol, interval, startTimestamp, endTimestamp, batchSize);
+            } else {
+                // 加密货币：调用OKX API
+                apiData = okxApiService.getHistoryKlineData(symbol, interval, startTimestamp, endTimestamp, batchSize);
+            }
+            
             // 转换并保存数据到MySQL
             if (apiData != null && !apiData.isEmpty()) {
                 // 转换并保存数据到MySQL
                 List<CandlestickEntity> entities = convertAndSaveCandlesticks(apiData, symbol, interval);
-
                 result.addAll(entities);
             }
         } else {
             while (currentStart.isBefore(endTime) && !lastStart.format(dateFormat).equals(currentStart.format(dateFormat))) {
                 try {
-                    List<Candlestick> apiData = okxApiService.getHistoryKlineData(symbol, interval,
-                            currentStart.atZone(zoneId).toEpochSecond() * 1000,
-                            currentStart.plusMinutes(intervalMinutes * batchSize).atZone(zoneId).toEpochSecond() * 1000, batchSize);
+                    List<Candlestick> apiData;
+                    if (isStock) {
+                        // 股票：调用Tushare API
+                        apiData = tushareApiService.getHistoryKlineData(symbol, interval,
+                                currentStart.atZone(zoneId).toEpochSecond() * 1000,
+                                currentStart.plusMinutes(intervalMinutes * batchSize).atZone(zoneId).toEpochSecond() * 1000, batchSize);
+                    } else {
+                        // 加密货币：调用OKX API
+                        apiData = okxApiService.getHistoryKlineData(symbol, interval,
+                                currentStart.atZone(zoneId).toEpochSecond() * 1000,
+                                currentStart.plusMinutes(intervalMinutes * batchSize).atZone(zoneId).toEpochSecond() * 1000, batchSize);
+                    }
+                    
                     if (apiData != null && !apiData.isEmpty()) {
                         // 转换并保存数据到MySQL
                         List<CandlestickEntity> entities = convertAndSaveCandlesticks(apiData, symbol, interval);
