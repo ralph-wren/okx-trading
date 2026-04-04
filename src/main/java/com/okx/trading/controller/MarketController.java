@@ -26,10 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -363,6 +360,37 @@ public class MarketController {
      * @param limit  返回的数据条数，默认为50
      * @return 所有订阅币种的行情数据列表
      */
+    @Operation(summary = "获取单个币种信息", description = "根据交易对符号获取币种详细信息")
+    @Parameters({
+            @Parameter(name = "symbol", description = "交易对符号，如BTC-USDT",
+                    required = true, example = "BTC-USDT")
+    })
+    @GetMapping("/crypto/{symbol}")
+    public ApiResponse<Ticker> getCryptoInfo(@PathVariable String symbol) {
+        try {
+            log.info("获取币种信息: symbol={}", symbol);
+            
+            // 从 Hash 缓存中获取单个币种信息
+            String hashKey = "market:crypto:hash";
+            Object cachedValue = redisTemplate.opsForHash().get(hashKey, symbol);
+            
+            if (cachedValue != null) {
+                String jsonString = cachedValue.toString();
+                Ticker ticker = JSONObject.parseObject(jsonString, Ticker.class);
+                log.info("从缓存中获取币种信息: {}", symbol);
+                return ApiResponse.success(ticker);
+            }
+            
+            // 如果缓存不存在，从短期缓存或API获取
+            log.info("缓存不存在，尝试从实时数据获取: {}", symbol);
+            Ticker ticker = okxApiService.getTicker(symbol);
+            return ApiResponse.success(ticker);
+        } catch (Exception e) {
+            log.error("获取币种信息失败", e);
+            return ApiResponse.error(500, "获取币种信息失败: " + e.getMessage());
+        }
+    }
+
     @Operation(summary = "获取所有币种最新行情", description = "获取所有已订阅币种的最新价格、24小时涨跌幅等行情数据")
     @Parameters({
             @Parameter(name = "filter", description = "过滤条件（all=所有币种, hot=热门币种, rise=涨幅最大, fall=跌幅最大）",
@@ -380,17 +408,62 @@ public class MarketController {
         log.info("获取所有币种最新行情, filter: {}, search: {}, limit: {}", filter, search, limit);
 
         List<Ticker> tickers = null;
-        Set<Object> members = redisTemplate.opsForSet().members(ALL_COIN_RT_PRICE);
-        if (!CollectionUtils.isEmpty(members)) {
-            tickers = members.stream().map(x -> JSONObject.parseObject((String) x, Ticker.class)).distinct().collect(Collectors.toList());
-            log.info("从缓存查询所有币种价格");
+        
+        // 优先从7天缓存中获取（启动时初始化的 Hash 缓存）
+        String hashKey = "market:crypto:hash";
+        Long hashSize = redisTemplate.opsForHash().size(hashKey);
+        
+        if (hashSize != null && hashSize > 0) {
+            log.info("从7天缓存中获取加密货币列表，共 {} 个交易对", hashSize);
+            
+            // 从短期缓存中获取详细行情数据（包含实时价格）
+            Set<Object> members = redisTemplate.opsForSet().members(ALL_COIN_RT_PRICE);
+            if (!CollectionUtils.isEmpty(members)) {
+                tickers = members.stream()
+                    .map(x -> JSONObject.parseObject((String) x, Ticker.class))
+                    .distinct()
+                    .collect(Collectors.toList());
+                log.info("从短期缓存查询所有币种价格");
+            } else {
+                // 如果短期缓存不存在，从 Hash 缓存中获取基础数据
+                java.util.Map<Object, Object> cryptoMap = redisTemplate.opsForHash().entries(hashKey);
+                tickers = new ArrayList<>();
+                for (Object value : cryptoMap.values()) {
+                    String jsonString = value.toString();
+                    Ticker ticker = JSONObject.parseObject(jsonString, Ticker.class);
+                    tickers.add(ticker);
+                }
+                log.info("从7天 Hash 缓存获取加密货币数据");
+                
+                // 更新短期缓存
+                if (!tickers.isEmpty()) {
+                    redisTemplate.opsForSet().add(ALL_COIN_RT_PRICE, 
+                        (Object[])Arrays.stream(tickers.toArray()).map(Object::toString).toArray(String[]::new));
+                    redisTemplate.expire(ALL_COIN_RT_PRICE, 10, TimeUnit.MINUTES);
+                }
+            }
         } else {
-            tickers = okxApiService.getAllTickers();
-            log.info("从接口查询所有币种价格");
-        }
+            // 如果7天缓存不存在，尝试从短期缓存获取
+            Set<Object> members = redisTemplate.opsForSet().members(ALL_COIN_RT_PRICE);
+            if (!CollectionUtils.isEmpty(members)) {
+                tickers = members.stream()
+                    .map(x -> JSONObject.parseObject((String) x, Ticker.class))
+                    .distinct()
+                    .collect(Collectors.toList());
+                log.info("从短期缓存查询所有币种价格");
+            } else {
+                // 从 API 获取
+                tickers = okxApiService.getAllTickers();
+                log.info("从接口查询所有币种价格");
+            }
 
-        redisTemplate.opsForSet().add(ALL_COIN_RT_PRICE, (Object[])Arrays.stream(tickers.toArray()).map(Object::toString).toArray(String[]::new));
-        redisTemplate.expire(ALL_COIN_RT_PRICE, 10, TimeUnit.MINUTES);
+            // 更新短期缓存
+            if (tickers != null && !tickers.isEmpty()) {
+                redisTemplate.opsForSet().add(ALL_COIN_RT_PRICE, 
+                    (Object[])Arrays.stream(tickers.toArray()).map(Object::toString).toArray(String[]::new));
+                redisTemplate.expire(ALL_COIN_RT_PRICE, 10, TimeUnit.MINUTES);
+            }
+        }
 
         // 如果有搜索条件，先过滤
         if (search != null && !search.trim().isEmpty()) {

@@ -1,5 +1,6 @@
 package com.okx.trading.controller;
 
+import com.alibaba.fastjson.JSON;
 import com.okx.trading.model.market.Candlestick;
 import com.okx.trading.model.market.Ticker;
 import com.okx.trading.service.TushareApiService;
@@ -9,6 +10,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,6 +27,9 @@ public class StockMarketController {
 
     @Autowired
     private TushareApiService tushareApiService;
+    
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     @GetMapping("/test")
     @Operation(summary = "测试Tushare连接", description = "测试Tushare API是否可以正常连接")
@@ -137,11 +142,72 @@ public class StockMarketController {
             @Parameter(description = "上市状态：L-上市, D-退市, P-暂停上市") @RequestParam(required = false, defaultValue = "L") String listStatus) {
         try {
             log.info("获取股票信息列表: exchange={}, listStatus={}", exchange, listStatus);
-            List<com.okx.trading.model.dto.StockInfo> stockList = tushareApiService.getStockInfoList(exchange, listStatus);
+            
+            // 优先从7天缓存中获取（启动时初始化的 Hash 缓存）
+            String hashKey = "market:stock:hash";
+            Long hashSize = redisTemplate.opsForHash().size(hashKey);
+            
+            if (hashSize != null && hashSize > 0) {
+                // 从 Hash 中获取所有股票信息
+                java.util.Map<Object, Object> stockMap = redisTemplate.opsForHash().entries(hashKey);
+                List<com.okx.trading.model.dto.StockInfo> cachedStockList = new java.util.ArrayList<>();
+                
+                for (Object value : stockMap.values()) {
+                    String jsonString = value.toString();
+                    com.okx.trading.model.dto.StockInfo stock = 
+                        JSON.parseObject(jsonString, com.okx.trading.model.dto.StockInfo.class);
+                    cachedStockList.add(stock);
+                }
+                
+                log.info("从7天缓存中获取股票列表，共 {} 只股票", cachedStockList.size());
+                
+                // 根据参数过滤
+                List<com.okx.trading.model.dto.StockInfo> filteredList = cachedStockList;
+                if (exchange != null && !exchange.trim().isEmpty()) {
+                    filteredList = cachedStockList.stream()
+                        .filter(stock -> exchange.equals(stock.getExchange()))
+                        .collect(java.util.stream.Collectors.toList());
+                }
+                
+                return ApiResponse.success(filteredList);
+            }
+            
+            // 如果缓存不存在，从API获取
+            log.info("缓存不存在，从 Tushare API 获取股票列表");
+            List<com.okx.trading.model.dto.StockInfo> stockList = 
+                tushareApiService.getStockInfoList(exchange, listStatus);
             return ApiResponse.success(stockList);
         } catch (Exception e) {
             log.error("获取股票信息列表失败", e);
             return ApiResponse.error(500, "获取股票信息列表失败: " + e.getMessage());
+        }
+    }
+    
+    @GetMapping("/stock/info/{code}")
+    @Operation(summary = "获取单个股票信息", description = "根据股票代码获取股票详细信息")
+    public ApiResponse<com.okx.trading.model.dto.StockInfo> getStockInfo(
+            @Parameter(description = "股票代码，如000001.SZ") @PathVariable String code) {
+        try {
+            log.info("获取股票信息: code={}", code);
+            
+            // 从 Hash 缓存中获取单个股票信息
+            String hashKey = "market:stock:hash";
+            Object cachedValue = redisTemplate.opsForHash().get(hashKey, code);
+            
+            if (cachedValue != null) {
+                String jsonString = cachedValue.toString();
+                com.okx.trading.model.dto.StockInfo stock = 
+                    JSON.parseObject(jsonString, com.okx.trading.model.dto.StockInfo.class);
+                log.info("从缓存中获取股票信息: {}", code);
+                return ApiResponse.success(stock);
+            }
+            
+            // 如果缓存不存在，返回未找到
+            log.warn("股票信息不存在: {}", code);
+            return ApiResponse.error(404, "股票信息不存在");
+        } catch (Exception e) {
+            log.error("获取股票信息失败", e);
+            return ApiResponse.error(500, "获取股票信息失败: " + e.getMessage());
         }
     }
 }
