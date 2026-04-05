@@ -296,8 +296,19 @@ public class TelegramScraperService {
                         channelName, retryCount, maxRetries, e.getMessage());
                 
                 if (retryCount >= maxRetries) {
-                    log.error("Failed to connect to Telegram channel {} after {} attempts due to SSL error. Consider disabling this channel or checking network/proxy settings.", 
+                    log.error("Failed to connect to Telegram channel {} after {} attempts due to SSL error. Auto-disabling this channel.", 
                             channelName, maxRetries);
+                    
+                    // 自动禁用连续失败的频道
+                    try {
+                        telegramChannelRepository.findByChannelName(channelName).ifPresent(channel -> {
+                            channel.setActive(false);
+                            telegramChannelRepository.save(channel);
+                            log.info("Channel {} has been auto-disabled due to repeated SSL failures", channelName);
+                        });
+                    } catch (Exception ex) {
+                        log.error("Failed to disable channel {}", channelName, ex);
+                    }
                     return;
                 }
                 
@@ -315,8 +326,19 @@ public class TelegramScraperService {
                         channelName, retryCount, maxRetries);
                 
                 if (retryCount >= maxRetries) {
-                    log.error("Failed to connect to Telegram channel {} after {} attempts due to timeout", 
+                    log.error("Failed to connect to Telegram channel {} after {} attempts due to timeout. Auto-disabling this channel.", 
                             channelName, maxRetries);
+                    
+                    // 自动禁用连续超时的频道
+                    try {
+                        telegramChannelRepository.findByChannelName(channelName).ifPresent(channel -> {
+                            channel.setActive(false);
+                            telegramChannelRepository.save(channel);
+                            log.info("Channel {} has been auto-disabled due to repeated timeouts", channelName);
+                        });
+                    } catch (Exception ex) {
+                        log.error("Failed to disable channel {}", channelName, ex);
+                    }
                     return;
                 }
                 

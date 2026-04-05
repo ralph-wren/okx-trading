@@ -107,6 +107,9 @@ public class OkxApiWebSocketServiceImpl implements OkxApiService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    // instId -> instIdCode 映射缓存 (根据 OKX 2026-03-26 更新，WebSocket 订单需要使用 instIdCode)
+    private final Map<String, Integer> instIdCodeCache = new ConcurrentHashMap<>();
+
     @PostConstruct
     public void init() {
         // 注册消息处理器
@@ -133,6 +136,72 @@ public class OkxApiWebSocketServiceImpl implements OkxApiService {
         webSocketUtil.registerHandler("account", this::handleAccountMessage);
         webSocketUtil.registerHandler("orders", this::handleOrdersMessage);
         webSocketUtil.registerHandler("order", this::handleOrderMessage);
+    }
+
+    /**
+     * 获取交易对的 instIdCode
+     * 根据 OKX 2026-03-26 更新，WebSocket 订单 API 需要使用 instIdCode 而不是 instId
+     * 
+     * @param instId 交易对标识，如 BTC-USDT
+     * @param instType 产品类型，如 SPOT, SWAP 等
+     * @return instIdCode 整数值
+     */
+    private Integer getInstIdCode(String instId, String instType) {
+        // 先从缓存中查找
+        if (instIdCodeCache.containsKey(instId)) {
+            return instIdCodeCache.get(instId);
+        }
+
+        // 缓存中没有，调用 API 获取
+        try {
+            // 使用公共 API 端点获取产品信息
+            String apiUrl = okxApiConfig.getBaseUrl() + "/api/v5/public/instruments?instType=" + instType + "&instId=" + instId;
+            
+            log.info("调用 instruments API: {}", apiUrl);
+            
+            // 公共 API 不需要签名
+            Request request = new Request.Builder()
+                    .url(apiUrl)
+                    .addHeader("Content-Type", "application/json")
+                    .get()
+                    .build();
+
+            try (Response response = okHttpClient.newCall(request).execute()) {
+                if (response.isSuccessful() && response.body() != null) {
+                    String responseBody = response.body().string();
+                    log.info("获取 instruments 响应: {}", responseBody);
+
+                    JSONObject responseJson = JSONObject.parseObject(responseBody);
+                    if ("0".equals(responseJson.getString("code"))) {
+                        JSONArray data = responseJson.getJSONArray("data");
+                        if (data != null && !data.isEmpty()) {
+                            JSONObject instrument = data.getJSONObject(0);
+                            Integer instIdCode = instrument.getInteger("instIdCode");
+                            if (instIdCode != null) {
+                                // 缓存结果
+                                instIdCodeCache.put(instId, instIdCode);
+                                log.info("成功获取并缓存 instIdCode: {} -> {}", instId, instIdCode);
+                                return instIdCode;
+                            } else {
+                                log.warn("响应中没有 instIdCode 字段: {}", instrument.toJSONString());
+                            }
+                        } else {
+                            log.warn("API 返回空数据，可能交易对不存在: instId={}, instType={}", instId, instType);
+                        }
+                    } else {
+                        log.error("获取 instIdCode 失败，错误码: {}, 错误信息: {}", 
+                                responseJson.getString("code"), responseJson.getString("msg"));
+                    }
+                } else {
+                    log.error("API 请求失败，HTTP 状态码: {}, 响应: {}", 
+                            response.code(), response.body() != null ? response.body().string() : "null");
+                }
+            }
+        } catch (Exception e) {
+            log.error("获取 instIdCode 异常: instId={}, 错误: {}", instId, e.getMessage(), e);
+        }
+
+        return null;
     }
 
     /**
@@ -717,7 +786,17 @@ public class OkxApiWebSocketServiceImpl implements OkxApiService {
             requestMessage.put("op", "order");
 
             JSONObject arg = new JSONObject();
-            arg.put("instId", orderRequest.getSymbol());
+            
+            // 根据 OKX 2026-03-26 更新：WebSocket 订单需要使用 instIdCode 而不是 instId
+            // Phase 1 (2026-03-26): WS Place order 和 Place multiple orders 已废弃 instId
+            // Phase 2 (2026-04-07): WS Amend/Cancel order 将废弃 instId
+            Integer instIdCode = getInstIdCode(orderRequest.getSymbol(), instType);
+            if (instIdCode == null) {
+                log.error("无法获取 instIdCode: symbol={}, instType={}", orderRequest.getSymbol(), instType);
+                throw new OkxApiException("无法获取交易对的 instIdCode，请检查交易对是否有效");
+            }
+            
+            arg.put("instIdCode", instIdCode);
             arg.put("tdMode", "cash"); // 资金模式，cash为现钞
             arg.put("side", orderRequest.getSide().toLowerCase());
             if (orderRequest.getType() != null) {

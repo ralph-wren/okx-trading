@@ -28,6 +28,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.concurrent.TimeUnit;
+
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
@@ -417,6 +419,16 @@ public class MarketController {
             @RequestParam(required = false, defaultValue = "all") String filter,
             @RequestParam(required = false) String search,
             @RequestParam(required = false, defaultValue = "50") Integer limit) {
+        
+        // 构建缓存键（5秒内的重复请求直接返回缓存）
+        String cacheKey = "api:all_tickers:" + filter + ":" + (search != null ? search : "null") + ":" + limit;
+        String cachedResult = (String) redisTemplate.opsForValue().get(cacheKey);
+        if (cachedResult != null) {
+            log.debug("✅ 使用请求级别缓存，跳过查询");
+            List<Ticker> cachedTickers = JSONArray.parseArray(cachedResult, Ticker.class);
+            return ApiResponse.success(cachedTickers);
+        }
+        
         log.info("获取所有币种最新行情, filter: {}, search: {}, limit: {}", filter, search, limit);
 
         List<Ticker> tickers = null;
@@ -501,6 +513,9 @@ public class MarketController {
         if (limit != null && limit > 0 && tickers.size() > limit) {
             tickers = tickers.subList(0, limit);
         }
+
+        // 保存请求级别缓存（5秒有效期）
+        redisTemplate.opsForValue().set(cacheKey, JSONArray.toJSONString(tickers), 5, TimeUnit.SECONDS);
 
         return ApiResponse.success(tickers);
     }
