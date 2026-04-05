@@ -882,6 +882,13 @@ public class Ta4jBacktestController {
                             .build();
                     strategyConversationService.saveConversation(conversation);
 
+                    // 如果对话记录中有编译错误，同步更新strategy_info表的load_error字段
+                    if (compileError != null && !compileError.trim().isEmpty()) {
+                        savedStrategy.setLoadError(compileError);
+                        strategyInfoService.saveStrategy(savedStrategy);
+                        log.debug("同步编译错误到strategy_info表，策略ID: {}", savedStrategy.getId());
+                    }
+
                     generatedStrategies.add(savedStrategy);
                     
                     if (compileSuccess) {
@@ -1023,6 +1030,18 @@ public class Ta4jBacktestController {
                     .originalCode(originalCode)  // 保存格式化的原始代码
                     .build();
             strategyConversationService.saveConversation(conversation);
+
+            // 如果对话记录中有编译错误，同步更新strategy_info表的load_error字段
+            if (compileError != null && !compileError.trim().isEmpty()) {
+                updatedStrategy.setLoadError(compileError);
+                strategyInfoService.saveStrategy(updatedStrategy);
+                log.debug("同步编译错误到strategy_info表，策略ID: {}", updatedStrategy.getId());
+            } else {
+                // 如果编译成功，清除之前的错误信息
+                updatedStrategy.setLoadError(null);
+                strategyInfoService.saveStrategy(updatedStrategy);
+                log.debug("清除strategy_info表的编译错误，策略ID: {}", updatedStrategy.getId());
+            }
 
             if (compileSuccess) {
                 log.info("策略更新并编译成功，策略代码: {}", existingStrategy.getStrategyCode());

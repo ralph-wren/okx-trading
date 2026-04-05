@@ -260,7 +260,8 @@ create table strategy_conversation
  create_time       datetime                        not null,
  strategy_id       bigint                          not null,
  user_input        text collate utf8mb4_unicode_ci null,
- compile_error     text collate utf8mb4_unicode_ci null);
+ compile_error     text collate utf8mb4_unicode_ci null,
+ original_code     text collate utf8mb4_unicode_ci null comment 'AI返回的原始代码，保持换行格式');
 
 create index idx_strategy_conversation_strategy_id on strategy_conversation (strategy_id);
 

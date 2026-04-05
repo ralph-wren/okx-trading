@@ -80,26 +80,57 @@ public class DeepSeekApiService {
             + "   - paramsDesc: 参数描述（JSON对象格式，key为参数名，value为中文描述）\n"
             + "   - strategyCode: Ta4j策略Java类代码\n"
             + "2. strategyCode【强制格式要求】：\n"
+            + "   ╔═══════════════════════════════════════════════════════════════════════════╗\n"
+            + "   ║                    ⚠️  代码格式 - 严格遵守 ⚠️                             ║\n"
+            + "   ╚═══════════════════════════════════════════════════════════════════════════╝\n"
             + "   - 【必须】生成包含静态方法的Java类：public class CreateXxxStrategy\n"
             + "   - 【必须】包含静态方法：public static Strategy createXxxStrategy(BarSeries series)\n"
             + "   - 【绝对禁止】任何extends BaseStrategy的继承格式\n"
             + "   - 【绝对禁止】任何构造函数super()调用\n"
             + "   - 【绝对禁止】任何内部类、匿名类或自定义指标类\n"
+            + "\n"
+            + "   ╔═══════════════════════════════════════════════════════════════════════════╗\n"
+            + "   ║              ⛔ 禁止使用的方法和类 - 会导致编译失败 ⛔                    ║\n"
+            + "   ╚═══════════════════════════════════════════════════════════════════════════╝\n"
             + "   - 【绝对禁止】使用 series.numOf() 包装数值或指标\n"
             + "   - 【绝对禁止】使用 new AndRule() 或 new OrRule() 构造函数\n"
+            + "   - 【绝对禁止】使用 rule.not() 方法（应使用 rule.negation()）\n"
+            + "   - 【绝对禁止】使用 indicator.getIndicator() 或 indicator.getIndicator(index) 方法\n"
+            + "   - 【绝对禁止】使用算术指标类：MinusIndicator, MultipliedIndicator, PlusIndicator, DividedIndicator\n"
+            + "   - 【绝对禁止】使用指标算术方法：.minus(), .plus(), .multipliedBy(), .dividedBy(), .multiply()\n"
+            + "   - 【绝对禁止】使用布林带指标：BollingerBandsUpperIndicator, BollingerBandsLowerIndicator, BollingerBandsMiddleIndicator\n"
+            + "   - 【绝对禁止】使用不存在的指标：IchimokuXxx, ParabolicSar, ChandelierExit, UlcerIndex\n"
+            + "\n"
+            + "   ╔═══════════════════════════════════════════════════════════════════════════╗\n"
+            + "   ║                  ✅ 允许使用的指标和规则 ✅                                ║\n"
+            + "   ╚═══════════════════════════════════════════════════════════════════════════╝\n"
+            + "   【可用指标】只使用以下简单指标：\n"
+            + "     ✅ SMAIndicator, EMAIndicator, WMAIndicator（均线）\n"
+            + "     ✅ RSIIndicator（相对强弱指标）\n"
+            + "     ✅ MACDIndicator（MACD指标，构造函数：new MACDIndicator(closePrice, shortPeriod, longPeriod)）\n"
+            + "     ✅ VolumeIndicator（成交量）\n"
+            + "     ✅ ClosePriceIndicator, HighPriceIndicator, LowPriceIndicator（价格）\n"
+            + "     ✅ StandardDeviationIndicator（标准差，仅用于简单比较，不做算术运算）\n"
+            + "\n"
+            + "   【可用规则】只使用以下比较规则：\n"
+            + "     ✅ CrossedUpIndicatorRule, CrossedDownIndicatorRule（交叉规则）\n"
+            + "     ✅ OverIndicatorRule, UnderIndicatorRule（比较规则）\n"
+            + "     ✅ StopGainRule, StopLossRule（止盈止损）\n"
+            + "\n"
+            + "   【规则组合】使用链式调用：\n"
+            + "     ✅ rule1.and(rule2)  // 正确\n"
+            + "     ✅ rule1.or(rule2)   // 正确\n"
+            + "     ✅ rule1.and(rule2).or(rule3)  // 正确\n"
+            + "     ❌ new AndRule(rule1, rule2)  // 错误！\n"
+            + "     ❌ new OrRule(rule1, rule2)   // 错误！\n"
+            + "\n"
             + "   - 类名格式：Create + 策略英文名 + Strategy（如：CreateDualMaRsiStrategy）\n"
             + "   - 方法名格式：create + 策略英文名 + Strategy（如：createDualMaRsiStrategy）\n"
-            + "   - 使用Ta4j库现有的指标和规则\n"
-            + "   - 包含买入和卖出规则\n"
-            + "   - 代码要简洁且可编译\n"
             + "   - 在方法开头进行数据点检查：if (series.getBarCount() <= period) throw new IllegalArgumentException(\"数据点不足以计算指标\")\n"
             + "   - 最后返回：return new BaseStrategy(entryRule, exitRule)\n"
-            + "   - 【关键约束】只能使用 Ta4j 0.18 中真实存在的指标类\n"
-            + "   - 【关键约束】Rule 组合使用链式调用：rule1.and(rule2) 或 rule1.or(rule2)\n"
             + "   - 【关键约束】Rule 类直接接受数值，不需要 series.numOf() 包装\n"
+            + "   - 【关键约束】指标对象直接使用，不需要调用 getIndicator() 方法\n"
             + "   - 【关键约束】不需要 import 语句，直接生成类代码\n"
-            + "   - 常用指标：SMAIndicator、EMAIndicator、RSIIndicator、MACDIndicator、VolumeIndicator、ClosePriceIndicator\n"
-            + "   - 常用规则：CrossedUpIndicatorRule、CrossedDownIndicatorRule、OverIndicatorRule、UnderIndicatorRule\n"
             + "   - 【重要】所有策略都必须严格按照以下模板格式编写：\n"
             + "   ```java\n"
             + "   public class CreateDualMaRsiStrategy {\n"
@@ -126,50 +157,71 @@ public class DeepSeekApiService {
             + "   }\n"
             + "   ```\n";
 
-    private String codeGeneratePromotion = "\n\n【严格代码规范 - 必须严格遵守】\n"
+    private String codeGeneratePromotion = "\n\n"
+            + "╔═══════════════════════════════════════════════════════════════════════════╗\n"
+            + "║                 ⚠️  严格代码规范 - 必须严格遵守 ⚠️                        ║\n"
+            + "║  违反以下任何规则将导致编译失败！                                          ║\n"
+            + "╚═══════════════════════════════════════════════════════════════════════════╝\n"
+            + "\n"
             + "1. 【绝对禁止】以下类型的代码结构：\n"
-            + "   - 任何继承BaseStrategy的类：public class XxxStrategy extends BaseStrategy\n"
-            + "   - 任何构造函数：public XxxStrategy(BarSeries series)\n"
-            + "   - 任何super()调用：super(entryRule, exitRule)\n"
-            + "   - 任何内部类、匿名类或自定义指标类\n"
-            + "   - 任何复杂的数学运算和类型转换\n"
-            + "   - 禁止手写逐 K 线遍历并用 getValue(index) 拼交易逻辑；应使用 Indicator + Rule\n"
-            + "   - 任何除了静态方法之外的其他方法\n"
+            + "   ❌ 任何继承BaseStrategy的类：public class XxxStrategy extends BaseStrategy\n"
+            + "   ❌ 任何构造函数：public XxxStrategy(BarSeries series)\n"
+            + "   ❌ 任何super()调用：super(entryRule, exitRule)\n"
+            + "   ❌ 任何内部类、匿名类或自定义指标类\n"
+            + "   ❌ 任何复杂的数学运算和类型转换\n"
+            + "   ❌ 禁止手写逐 K 线遍历并用 getValue(index) 拼交易逻辑；应使用 Indicator + Rule\n"
+            + "   ❌ 任何除了静态方法之外的其他方法\n"
+            + "\n"
             + "2. 【必须遵循】代码结构：\n"
-            + "   - 只能有一个静态方法：public static Strategy createXxxStrategy(BarSeries series)\n"
-            + "   - 方法中最后必须返回：return new BaseStrategy(entryRule, exitRule)\n"
-            + "   - 买卖规则必须在方法中直接创建\n"
-            + "   - 只能使用现有指标类和规则类\n"
+            + "   ✅ 只能有一个静态方法：public static Strategy createXxxStrategy(BarSeries series)\n"
+            + "   ✅ 方法中最后必须返回：return new BaseStrategy(entryRule, exitRule)\n"
+            + "   ✅ 买卖规则必须在方法中直接创建\n"
+            + "   ✅ 只能使用现有指标类和规则类\n"
+            + "\n"
             + "3. 【禁止格式示例 - 绝对不能生成】：\n"
-            + "   public class VolumeStrategy extends BaseStrategy {\n"
-            + "       public VolumeStrategy(BarSeries series) {\n"
-            + "           super(entryRule, exitRule);\n"
-            + "       }\n"
-            + "   }\n"
-            + "   class CustomIndicator extends CachedIndicator<Num> // 禁止自定义指标类\n"
-            + "   public createXxxStrategy(BarSeries series, int period) // 禁止多参数方法\n"
-            + "   Num value = indicator.getValue(series.getEndIndex()) // 禁止动态值获取\n"
+            + "   ❌ public class VolumeStrategy extends BaseStrategy {\n"
+            + "   ❌     public VolumeStrategy(BarSeries series) {\n"
+            + "   ❌         super(entryRule, exitRule);\n"
+            + "   ❌     }\n"
+            + "   ❌ }\n"
+            + "   ❌ class CustomIndicator extends CachedIndicator<Num> // 禁止自定义指标类\n"
+            + "   ❌ public createXxxStrategy(BarSeries series, int period) // 禁止多参数方法\n"
+            + "   ❌ Num value = indicator.getValue(series.getEndIndex()) // 禁止动态值获取\n"
+            + "   ❌ indicator.minus(otherIndicator) // 禁止算术方法\n"
+            + "   ❌ new MinusIndicator(indicator1, indicator2) // 禁止算术指标类\n"
+            + "   ❌ new BollingerBandsUpperIndicator(...) // 禁止布林带\n"
+            + "   ❌ rule.not() // 禁止使用.not()方法\n"
+            + "   ❌ indicator.getIndicator(index) // 禁止使用.getIndicator()方法\n"
+            + "   ❌ series.numOf(value) // 禁止使用series.numOf()\n"
+            + "\n"
             + "4. 【强制格式示例 - 必须严格按照此格式】：\n"
-            + "   public class CreateVolumeStrategy {\n"
-            + "       public static Strategy createVolumeStrategy(BarSeries series) {\n"
-            + "           int period = 20;\n"
-            + "           if (series.getBarCount() <= period) {\n"
-            + "               throw new IllegalArgumentException(\"数据点不足以计算指标\");\n"
-            + "           }\n"
-            + "           VolumeIndicator volume = new VolumeIndicator(series);\n"
-            + "           SMAIndicator sma = new SMAIndicator(volume, period);\n"
-            + "           Rule entryRule = new OverIndicatorRule(volume, sma);\n"
-            + "           Rule exitRule = new UnderIndicatorRule(volume, sma);\n"
-            + "           return new BaseStrategy(entryRule, exitRule);\n"
-            + "       }\n"
-            + "   }\n"
+            + "   ✅ public class CreateVolumeStrategy {\n"
+            + "   ✅     public static Strategy createVolumeStrategy(BarSeries series) {\n"
+            + "   ✅         int period = 20;\n"
+            + "   ✅         if (series.getBarCount() <= period) {\n"
+            + "   ✅             throw new IllegalArgumentException(\"数据点不足以计算指标\");\n"
+            + "   ✅         }\n"
+            + "   ✅         VolumeIndicator volume = new VolumeIndicator(series);\n"
+            + "   ✅         SMAIndicator sma = new SMAIndicator(volume, period);\n"
+            + "   ✅         Rule entryRule = new OverIndicatorRule(volume, sma);\n"
+            + "   ✅         Rule exitRule = new UnderIndicatorRule(volume, sma);\n"
+            + "   ✅         return new BaseStrategy(entryRule, exitRule);\n"
+            + "   ✅     }\n"
+            + "   ✅ }\n"
+            + "\n"
             + "5. 【编译错误修复】如果涉及复杂指标，改用简单的SMA/EMA交叉策略\n"
-            + "6. 【再次强调】绝对不能生成继承BaseStrategy的格式，只能生成包含静态方法的格式！\n";
+            + "6. 【再次强调】绝对不能生成继承BaseStrategy的格式，只能生成包含静态方法的格式！\n"
+            + "7. 【最后提醒】如果不确定某个指标或方法是否存在，不要使用！只用模板中的简单指标！\n";
 
     /**
      * Ta4j 0.18 与项目动态编译环境说明，避免模型按旧版/错误包名生成不可编译代码。
      */
     private void appendTa4j018RuntimeSpec(StringBuilder sb) {
+        sb.append("╔═══════════════════════════════════════════════════════════════════════════╗\n");
+        sb.append("║                    ⚠️  严格编译要求 - 必须遵守 ⚠️                          ║\n");
+        sb.append("║  违反以下任何规则将导致编译失败，策略无法使用！                              ║\n");
+        sb.append("╚═══════════════════════════════════════════════════════════════════════════╝\n\n");
+        
         sb.append("【Ta4j 版本与 API：必须与当前工程一致 — Maven 依赖 ta4j-core 0.18】\n");
         sb.append("- 仅使用包名 org.ta4j.core.*，禁止使用已废弃的 eu.verdelhan.ta4j。\n");
         sb.append("- SMAIndicator、EMAIndicator 等均线类在子包 indicators.averages；代码里写短类名即可（编译时会自动 import averages.*）。\n");
@@ -177,34 +229,94 @@ public class DeepSeekApiService {
         sb.append("- 价格源：ClosePriceIndicator closePrice = new ClosePriceIndicator(series)。\n");
         sb.append("- RSI：new RSIIndicator(new ClosePriceIndicator(series), period)。\n");
         sb.append("- MACD：new MACDIndicator(new ClosePriceIndicator(series), shortPeriod, longPeriod)；【禁止】写成 new MACDIndicator(shortEma, longEma)。\n");
-        sb.append("- 【重要】Rule 类可以直接接受数值和指标，不需要 series.numOf() 包装：\n");
+        sb.append("\n");
+        sb.append("【重要】Rule 类可以直接接受数值和指标，不需要 series.numOf() 包装：\n");
         sb.append("  ✅ 正确：new UnderIndicatorRule(rsi, 30)\n");
         sb.append("  ✅ 正确：new UnderIndicatorRule(rsi, rsiOverbought)\n");
         sb.append("  ✅ 正确：new OverIndicatorRule(volume, volumeSma)\n");
         sb.append("  ❌ 错误：new UnderIndicatorRule(rsi, series.numOf(30))\n");
         sb.append("  ❌ 错误：new OverIndicatorRule(volume, series.numOf(volumeSma))\n");
-        sb.append("- 【重要】Rule 组合使用链式调用，不使用 AndRule/OrRule 构造函数：\n");
+        sb.append("\n");
+        sb.append("【重要】Rule 组合使用链式调用，不使用 AndRule/OrRule 构造函数：\n");
         sb.append("  ✅ 正确：rule1.and(rule2).and(rule3)\n");
         sb.append("  ✅ 正确：rule1.or(rule2)\n");
         sb.append("  ❌ 错误：new AndRule(rule1, rule2, rule3)\n");
         sb.append("  ❌ 错误：new OrRule(rule1, rule2)\n");
+        sb.append("\n");
+        sb.append("【重要】Rule 取反使用 negation() 方法，不使用 not() 方法：\n");
+        sb.append("  ✅ 正确：rule.negation()\n");
+        sb.append("  ✅ 正确：new CrossedUpIndicatorRule(shortEma, longEma).negation()\n");
+        sb.append("  ❌ 错误：rule.not()\n");
+        sb.append("  ❌ 错误：highVolatilityRule.not()\n");
+        sb.append("\n");
+        sb.append("【重要】指标对象直接使用，不要调用 getIndicator() 方法：\n");
+        sb.append("  ✅ 正确：new UnderIndicatorRule(rsi, 30)\n");
+        sb.append("  ✅ 正确：new OverIndicatorRule(lowPrice, support)\n");
+        sb.append("  ❌ 错误：new UnderIndicatorRule(rsi.getIndicator(index), 30)\n");
+        sb.append("  ❌ 错误：new OverIndicatorRule(lowPrice.getIndicator(index), support)\n");
+        sb.append("  说明：指标类（如 RSIIndicator、LowPriceIndicator）本身就是指标对象，可以直接用于规则，不需要调用任何方法\n");
+        sb.append("\n");
         sb.append("- 策略对象：return new BaseStrategy(entryRule, exitRule)。\n");
-        sb.append("- 【可用指标列表】（只使用以下指标，不要编造）：\n");
+        sb.append("\n");
+        sb.append("【可用指标列表】（只使用以下指标，不要编造）：\n");
         sb.append("  * 均线：SMAIndicator, EMAIndicator, WMAIndicator\n");
         sb.append("  * 动量：RSIIndicator, MACDIndicator, StochasticOscillatorKIndicator\n");
         sb.append("  * 成交量：VolumeIndicator, OnBalanceVolumeIndicator\n");
         sb.append("  * 价格：ClosePriceIndicator, HighPriceIndicator, LowPriceIndicator\n");
         sb.append("  * 波动：StandardDeviationIndicator\n");
-        sb.append("- 【可用规则列表】（只使用以下规则）：\n");
+        sb.append("\n");
+        sb.append("【可用规则列表】（只使用以下规则）：\n");
         sb.append("  * 交叉：CrossedUpIndicatorRule, CrossedDownIndicatorRule\n");
         sb.append("  * 比较：OverIndicatorRule, UnderIndicatorRule\n");
         sb.append("  * 停损：StopGainRule, StopLossRule\n");
-        sb.append("- 【禁止使用】以下不存在或已废弃的类：\n");
+        sb.append("\n");
+        sb.append("【禁止使用】以下不存在或已废弃的类和方法：\n");
+        sb.append("  ╔════════════════════════════════════════════════════════════════╗\n");
+        sb.append("  ║  ⛔ 绝对禁止 - 这些类和方法在 Ta4j 0.18 中不存在！           ║\n");
+        sb.append("  ╚════════════════════════════════════════════════════════════════╝\n");
         sb.append("  ❌ IchimokuTenkanSenIndicator, IchimokuKijunSenIndicator（不存在）\n");
         sb.append("  ❌ ParabolicSarIndicator, ChandelierExitIndicator（不存在）\n");
         sb.append("  ❌ UlcerIndexIndicator（不存在）\n");
         sb.append("  ❌ Decimal.valueOf(), DecimalNum.valueOf(), Num.valueOf()（不需要）\n");
-        sb.append("- 不确定时只用 SMA/EMA 交叉 + 上文模板中的指标。\n\n");
+        sb.append("  ❌ rule.not()（方法不存在，应使用 rule.negation()）\n");
+        sb.append("  ❌ indicator.getIndicator()（方法不存在，指标对象直接使用）\n");
+        sb.append("  ❌ indicator.getIndicator(index)（方法不存在，指标对象直接使用）\n");
+        sb.append("  ❌ series.numOf()（不需要，Rule 直接接受数值和指标）\n");
+        sb.append("\n");
+        sb.append("  ╔════════════════════════════════════════════════════════════════╗\n");
+        sb.append("  ║  ⛔ 禁止算术运算 - 不要使用任何指标算术操作！              ║\n");
+        sb.append("  ╚════════════════════════════════════════════════════════════════╝\n");
+        sb.append("  ❌ MinusIndicator, MultipliedIndicator, PlusIndicator, DividedIndicator（算术指标类全部禁止）\n");
+        sb.append("  ❌ indicator.minus()（方法不存在）\n");
+        sb.append("  ❌ indicator.plus()（方法不存在）\n");
+        sb.append("  ❌ indicator.multipliedBy()（方法不存在）\n");
+        sb.append("  ❌ indicator.dividedBy()（方法不存在）\n");
+        sb.append("  ❌ indicator.multiply()（方法不存在）\n");
+        sb.append("\n");
+        sb.append("  ╔════════════════════════════════════════════════════════════════╗\n");
+        sb.append("  ║  ⛔ 禁止复杂指标 - 只使用简单的基础指标！                 ║\n");
+        sb.append("  ╚════════════════════════════════════════════════════════════════╝\n");
+        sb.append("  ❌ BollingerBandsUpperIndicator（布林带上轨，禁止使用）\n");
+        sb.append("  ❌ BollingerBandsLowerIndicator（布林带下轨，禁止使用）\n");
+        sb.append("  ❌ BollingerBandsMiddleIndicator（布林带中轨，禁止使用）\n");
+        sb.append("  ❌ 任何需要算术运算的复合指标（全部禁止）\n");
+        sb.append("\n");
+        sb.append("【重要】避免复杂的指标运算和组合：\n");
+        sb.append("  ✅ 只使用简单的基础指标：SMA, EMA, RSI, MACD, Volume\n");
+        sb.append("  ✅ 只使用简单的比较规则：OverIndicatorRule, UnderIndicatorRule, CrossedUpIndicatorRule, CrossedDownIndicatorRule\n");
+        sb.append("  ✅ 规则组合使用链式调用：rule1.and(rule2).or(rule3)\n");
+        sb.append("  ❌ 不要尝试任何数学运算或复杂的指标组合\n");
+        sb.append("  ❌ 不要使用布林带、ATR、或任何需要计算的复合指标\n");
+        sb.append("  ❌ 如果不确定，只用 SMA/EMA 交叉 + RSI\n");
+        sb.append("\n");
+        sb.append("【策略复杂度限制】：\n");
+        sb.append("  ✅ 每个策略最多使用 3 个指标（例如：shortEma, longEma, rsi）\n");
+        sb.append("  ✅ 买入规则最多组合 2 个条件（例如：交叉 AND RSI过滤）\n");
+        sb.append("  ✅ 卖出规则最多组合 2 个条件\n");
+        sb.append("  ✅ 代码总行数不超过 25 行\n");
+        sb.append("  ❌ 不要嵌套指标计算\n");
+        sb.append("  ❌ 不要使用超过3个以上的指标\n");
+        sb.append("\n");
     }
 
     /**
