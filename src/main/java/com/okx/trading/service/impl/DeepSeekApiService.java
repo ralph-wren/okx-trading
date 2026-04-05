@@ -37,30 +37,33 @@ public class DeepSeekApiService {
     }
 
     private String strategyCodeTemplate = "{\n" +
-            "  \"strategyName\": \"成交量突破策略\",\n" +
-            "  \"strategyId\": \"VOLUME_BREAKOUT_STRATEGY_b6bf3c73-496a-4053-85da-fb5845f3daf4\",\n" +
-            "  \"description\": \"基于成交量突破的简单交易策略，当成交量超过其移动平均线时买入，当价格跌破短期均线时卖出\",\n" +
-            "  \"comments\": \"【使用场景】买卖力量对比分析。【优点】反映市场内在动力，衡量真实的买卖压力。【缺点】信号产生较慢，需要确认。【历史表现】夏普比率0.7-1.0，最大回撤20-28%。【特色】内在动力分析工具。\",\n" +
-            "  \"category\": \"成交量策略\",\n" +
-            "  \"defaultParams\": {\"volumePeriod\": 20, \"pricePeriod\": 10},\n" +
-            "  \"paramsDesc\": {\"volumePeriod\": \"成交量均线周期\", \"pricePeriod\": \"价格均线周期\"},\n" +
+            "  \"strategyName\": \"双均线RSI组合策略\",\n" +
+            "  \"strategyId\": \"DUAL_MA_RSI_STRATEGY_b6bf3c73-496a-4053-85da-fb5845f3daf4\",\n" +
+            "  \"description\": \"结合双均线交叉和RSI超买超卖信号的组合策略，使用8日和21日EMA交叉，配合RSI过滤\",\n" +
+            "  \"comments\": \"【使用场景】趋势跟踪与动量确认。【优点】双重信号确认，减少假突破。【缺点】信号产生较慢。【历史表现】夏普比率0.8-1.2，最大回撤15-25%。【特色】趋势+动量双重过滤。\",\n" +
+            "  \"category\": \"趋势策略\",\n" +
+            "  \"defaultParams\": {\"shortPeriod\": 8, \"longPeriod\": 21, \"rsiPeriod\": 14, \"rsiOverbought\": 70, \"rsiOversold\": 30},\n" +
+            "  \"paramsDesc\": {\"shortPeriod\": \"短期均线周期\", \"longPeriod\": \"长期均线周期\", \"rsiPeriod\": \"RSI周期\", \"rsiOverbought\": \"RSI超买阈值\", \"rsiOversold\": \"RSI超卖阈值\"},\n" +
             "  \"strategyCode\": \"" +
-            "public class CreateVolumeBreakoutStrategy {\\n" +
-            "    public static Strategy createVolumeBreakoutStrategy(BarSeries series) {\\n" +
-            "        int volumePeriod = 20;\\n" +
-            "        int pricePeriod = 10;\\n" +
+            "public class CreateDualMaRsiStrategy {\\n" +
+            "    public static Strategy createDualMaRsiStrategy(BarSeries series) {\\n" +
+            "        int shortPeriod = 8;\\n" +
+            "        int longPeriod = 21;\\n" +
+            "        int rsiPeriod = 14;\\n" +
+            "        int rsiOverbought = 70;\\n" +
+            "        int rsiOversold = 30;\\n" +
             "\\n" +
-            "        if (series.getBarCount() <= volumePeriod) {\\n" +
+            "        if (series.getBarCount() <= longPeriod) {\\n" +
             "            throw new IllegalArgumentException(\\\"数据点不足以计算指标\\\");\\n" +
             "        }\\n" +
             "\\n" +
-            "        VolumeIndicator volume = new VolumeIndicator(series);\\n" +
-            "        SMAIndicator volumeSma = new SMAIndicator(volume, volumePeriod);\\n" +
             "        ClosePriceIndicator closePrice = new ClosePriceIndicator(series);\\n" +
-            "        SMAIndicator priceSma = new SMAIndicator(closePrice, pricePeriod);\\n" +
+            "        EMAIndicator shortEma = new EMAIndicator(closePrice, shortPeriod);\\n" +
+            "        EMAIndicator longEma = new EMAIndicator(closePrice, longPeriod);\\n" +
+            "        RSIIndicator rsi = new RSIIndicator(closePrice, rsiPeriod);\\n" +
             "\\n" +
-            "        Rule entryRule = new OverIndicatorRule(volume, volumeSma);\\n" +
-            "        Rule exitRule = new UnderIndicatorRule(closePrice, priceSma);\\n" +
+            "        Rule entryRule = new CrossedUpIndicatorRule(shortEma, longEma).and(new UnderIndicatorRule(rsi, rsiOverbought));\\n" +
+            "        Rule exitRule = new CrossedDownIndicatorRule(shortEma, longEma).or(new OverIndicatorRule(rsi, rsiOverbought));\\n" +
             "\\n" +
             "        return new BaseStrategy(entryRule, exitRule);\\n" +
             "    }\\n" +
@@ -82,36 +85,41 @@ public class DeepSeekApiService {
             + "   - 【绝对禁止】任何extends BaseStrategy的继承格式\n"
             + "   - 【绝对禁止】任何构造函数super()调用\n"
             + "   - 【绝对禁止】任何内部类、匿名类或自定义指标类\n"
-            + "   - 类名格式：Create + 策略英文名 + Strategy（如：CreateVolumeBreakoutStrategy）\n"
-            + "   - 方法名格式：create + 策略英文名 + Strategy（如：createVolumeBreakoutStrategy）\n"
+            + "   - 【绝对禁止】使用 series.numOf() 包装数值或指标\n"
+            + "   - 【绝对禁止】使用 new AndRule() 或 new OrRule() 构造函数\n"
+            + "   - 类名格式：Create + 策略英文名 + Strategy（如：CreateDualMaRsiStrategy）\n"
+            + "   - 方法名格式：create + 策略英文名 + Strategy（如：createDualMaRsiStrategy）\n"
             + "   - 使用Ta4j库现有的指标和规则\n"
             + "   - 包含买入和卖出规则\n"
             + "   - 代码要简洁且可编译\n"
             + "   - 在方法开头进行数据点检查：if (series.getBarCount() <= period) throw new IllegalArgumentException(\"数据点不足以计算指标\")\n"
             + "   - 最后返回：return new BaseStrategy(entryRule, exitRule)\n"
-            + "   - 【关键约束】只能使用 Ta4j 0.18 中真实存在的指标类（如 SMAIndicator/EMAIndicator 在 averages 子包，写短名即可）\n"
-            + "   - 【关键约束】只能使用简单的规则组合，不要创建复杂的数学运算\n"
+            + "   - 【关键约束】只能使用 Ta4j 0.18 中真实存在的指标类\n"
+            + "   - 【关键约束】Rule 组合使用链式调用：rule1.and(rule2) 或 rule1.or(rule2)\n"
+            + "   - 【关键约束】Rule 类直接接受数值，不需要 series.numOf() 包装\n"
             + "   - 【关键约束】不需要 import 语句，直接生成类代码\n"
-            + "   - 常用指标：SMAIndicator、EMAIndicator、RSIIndicator、MACDIndicator、VolumeIndicator、OnBalanceVolumeIndicator、ClosePriceIndicator\n"
+            + "   - 常用指标：SMAIndicator、EMAIndicator、RSIIndicator、MACDIndicator、VolumeIndicator、ClosePriceIndicator\n"
             + "   - 常用规则：CrossedUpIndicatorRule、CrossedDownIndicatorRule、OverIndicatorRule、UnderIndicatorRule\n"
             + "   - 【重要】所有策略都必须严格按照以下模板格式编写：\n"
             + "   ```java\n"
-            + "   public class CreateVolumeBreakoutStrategy {\n"
-            + "       public static Strategy createVolumeBreakoutStrategy(BarSeries series) {\n"
-            + "           int volumePeriod = 20;\n"
-            + "           int pricePeriod = 10;\n"
+            + "   public class CreateDualMaRsiStrategy {\n"
+            + "       public static Strategy createDualMaRsiStrategy(BarSeries series) {\n"
+            + "           int shortPeriod = 8;\n"
+            + "           int longPeriod = 21;\n"
+            + "           int rsiPeriod = 14;\n"
+            + "           int rsiOverbought = 70;\n"
             + "           \n"
-            + "           if (series.getBarCount() <= volumePeriod) {\n"
+            + "           if (series.getBarCount() <= longPeriod) {\n"
             + "               throw new IllegalArgumentException(\"数据点不足以计算指标\");\n"
             + "           }\n"
             + "           \n"
-            + "           VolumeIndicator volume = new VolumeIndicator(series);\n"
-            + "           SMAIndicator volumeSma = new SMAIndicator(volume, volumePeriod);\n"
             + "           ClosePriceIndicator closePrice = new ClosePriceIndicator(series);\n"
-            + "           SMAIndicator priceSma = new SMAIndicator(closePrice, pricePeriod);\n"
+            + "           EMAIndicator shortEma = new EMAIndicator(closePrice, shortPeriod);\n"
+            + "           EMAIndicator longEma = new EMAIndicator(closePrice, longPeriod);\n"
+            + "           RSIIndicator rsi = new RSIIndicator(closePrice, rsiPeriod);\n"
             + "           \n"
-            + "           Rule entryRule = new OverIndicatorRule(volume, volumeSma);\n"
-            + "           Rule exitRule = new UnderIndicatorRule(closePrice, priceSma);\n"
+            + "           Rule entryRule = new CrossedUpIndicatorRule(shortEma, longEma).and(new UnderIndicatorRule(rsi, rsiOverbought));\n"
+            + "           Rule exitRule = new CrossedDownIndicatorRule(shortEma, longEma).or(new OverIndicatorRule(rsi, rsiOverbought));\n"
             + "           \n"
             + "           return new BaseStrategy(entryRule, exitRule);\n"
             + "       }\n"
@@ -168,10 +176,35 @@ public class DeepSeekApiService {
         sb.append("- VolumeIndicator 在 indicators.helpers；OnBalanceVolumeIndicator 在 indicators.volume。\n");
         sb.append("- 价格源：ClosePriceIndicator closePrice = new ClosePriceIndicator(series)。\n");
         sb.append("- RSI：new RSIIndicator(new ClosePriceIndicator(series), period)。\n");
-        sb.append("- MACD：new MACDIndicator(new ClosePriceIndicator(series), shortPeriod, longPeriod)；禁止写成 new MACDIndicator(shortEma, longEma)。\n");
-        sb.append("- 与数值常量比较时用 series.numOf，例如 new UnderIndicatorRule(rsi, series.numOf(30))。\n");
+        sb.append("- MACD：new MACDIndicator(new ClosePriceIndicator(series), shortPeriod, longPeriod)；【禁止】写成 new MACDIndicator(shortEma, longEma)。\n");
+        sb.append("- 【重要】Rule 类可以直接接受数值和指标，不需要 series.numOf() 包装：\n");
+        sb.append("  ✅ 正确：new UnderIndicatorRule(rsi, 30)\n");
+        sb.append("  ✅ 正确：new UnderIndicatorRule(rsi, rsiOverbought)\n");
+        sb.append("  ✅ 正确：new OverIndicatorRule(volume, volumeSma)\n");
+        sb.append("  ❌ 错误：new UnderIndicatorRule(rsi, series.numOf(30))\n");
+        sb.append("  ❌ 错误：new OverIndicatorRule(volume, series.numOf(volumeSma))\n");
+        sb.append("- 【重要】Rule 组合使用链式调用，不使用 AndRule/OrRule 构造函数：\n");
+        sb.append("  ✅ 正确：rule1.and(rule2).and(rule3)\n");
+        sb.append("  ✅ 正确：rule1.or(rule2)\n");
+        sb.append("  ❌ 错误：new AndRule(rule1, rule2, rule3)\n");
+        sb.append("  ❌ 错误：new OrRule(rule1, rule2)\n");
         sb.append("- 策略对象：return new BaseStrategy(entryRule, exitRule)。\n");
-        sb.append("- 不要编造指标类名；不确定时只用 SMA/EMA 交叉 + 上文模板中的指标。\n\n");
+        sb.append("- 【可用指标列表】（只使用以下指标，不要编造）：\n");
+        sb.append("  * 均线：SMAIndicator, EMAIndicator, WMAIndicator\n");
+        sb.append("  * 动量：RSIIndicator, MACDIndicator, StochasticOscillatorKIndicator\n");
+        sb.append("  * 成交量：VolumeIndicator, OnBalanceVolumeIndicator\n");
+        sb.append("  * 价格：ClosePriceIndicator, HighPriceIndicator, LowPriceIndicator\n");
+        sb.append("  * 波动：StandardDeviationIndicator\n");
+        sb.append("- 【可用规则列表】（只使用以下规则）：\n");
+        sb.append("  * 交叉：CrossedUpIndicatorRule, CrossedDownIndicatorRule\n");
+        sb.append("  * 比较：OverIndicatorRule, UnderIndicatorRule\n");
+        sb.append("  * 停损：StopGainRule, StopLossRule\n");
+        sb.append("- 【禁止使用】以下不存在或已废弃的类：\n");
+        sb.append("  ❌ IchimokuTenkanSenIndicator, IchimokuKijunSenIndicator（不存在）\n");
+        sb.append("  ❌ ParabolicSarIndicator, ChandelierExitIndicator（不存在）\n");
+        sb.append("  ❌ UlcerIndexIndicator（不存在）\n");
+        sb.append("  ❌ Decimal.valueOf(), DecimalNum.valueOf(), Num.valueOf()（不需要）\n");
+        sb.append("- 不确定时只用 SMA/EMA 交叉 + 上文模板中的指标。\n\n");
     }
 
     /**

@@ -55,6 +55,12 @@ public class StrategyConversationEntity {
     private String compileError;
 
     /**
+     * AI返回的原始策略代码（保持换行格式，方便阅读）
+     */
+    @Column(name = "original_code", columnDefinition = "TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+    private String originalCode;
+
+    /**
      * 创建时间
      */
     @Column(name = "create_time", nullable = false, updatable = false)

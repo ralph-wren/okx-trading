@@ -502,7 +502,7 @@ public class Ta4jBacktestController {
             // 从数据库中获取所有策略信息
             Map<String, Map<String, Object>> strategies = strategyInfoService.getStrategiesInfo();
 
-            // 为每个策略添加available字段，基于最后一次对话的compile_error字段
+            // 为每个策略添加available字段和compile_error字段，基于最后一次对话的compile_error字段
             for (Map.Entry<String, Map<String, Object>> entry : strategies.entrySet()) {
                 Map<String, Object> strategyInfo = entry.getValue();
                 String strategyCode = (String) strategyInfo.get("strategy_code");
@@ -516,16 +516,29 @@ public class Ta4jBacktestController {
                         // 查询最后一次对话记录
                         StrategyConversationEntity lastConversation = strategyConversationService.getLastConversation(strategyId);
 
-                        // 根据compile_error字段设置available
+                        // 根据compile_error字段设置available和load_error
                         boolean available = true;
+                        String compileError = null;
+                        
                         if (lastConversation != null && lastConversation.getCompileError() != null && !lastConversation.getCompileError().trim().isEmpty()) {
                             available = false;
+                            compileError = lastConversation.getCompileError();
                         }
-                        //加载错误也设置false
+                        
+                        // 如果strategy_info表的load_error也有值，也设置为不可用
                         if (StringUtils.isNotBlank(loadError)) {
                             available = false;
+                            // 如果conversation表没有错误信息，使用load_error
+                            if (compileError == null) {
+                                compileError = loadError;
+                            }
                         }
+                        
                         strategyInfo.put("available", available);
+                        // 将compile_error作为load_error返回给前端
+                        if (compileError != null) {
+                            strategyInfo.put("load_error", compileError);
+                        }
 
                     } catch (NumberFormatException e) {
                         log.warn("策略ID格式错误: {}", strategyIdStr);
@@ -840,27 +853,42 @@ public class Ta4jBacktestController {
 
                     // 编译并动态加载策略 - 使用智能编译服务
                     String compileError = null;
+                    boolean compileSuccess = true;
                     try {
                         smartDynamicStrategyService.compileAndLoadStrategy(generatedCode, savedStrategy);
+                        log.info("第{}个AI策略编译成功，策略代码: {}, 策略名称: {}", i + 1, uniqueStrategyId, strategyName);
                     } catch (Exception compileException) {
+                        compileSuccess = false;
                         compileError = compileException.getMessage();
+                        // 保存编译错误到strategy_info表的load_error字段
                         savedStrategy.setLoadError(compileError);
                         strategyInfoService.saveStrategy(savedStrategy);
-                        log.warn("智能编译服务失败，保存错误记录: {}", compileError);
+                        log.error("第{}个AI策略编译失败，策略代码: {}, 策略名称: {}, 错误: {}", 
+                            i + 1, uniqueStrategyId, strategyName, compileError);
+                        errorMessages.add(String.format("策略 %s 编译失败: %s", strategyName, compileError));
                     }
 
-                    // 保存完整的对话记录到strategy_conversation表（包含编译错误信息）
+                    // 从AI响应中提取原始代码（保持换行格式）
+                    String originalCode = extractOriginalCode(generatedCode);
+
+                    // 保存完整的对话记录到strategy_conversation表（始终包含编译错误信息和原始代码）
                     StrategyConversationEntity conversation = StrategyConversationEntity.builder()
                             .strategyId(savedStrategy.getId())
                             .userInput(originalDescription)
                             .aiResponse(strategyInfo.toJSONString())
                             .conversationType("generate")
-                            .compileError(compileError)
+                            .compileError(compileError)  // 始终保存，即使为null
+                            .originalCode(originalCode)  // 保存格式化的原始代码
                             .build();
                     strategyConversationService.saveConversation(conversation);
 
                     generatedStrategies.add(savedStrategy);
-                    log.info("第{}个AI策略生成成功，策略代码: {}, 策略名称: {}", i + 1, uniqueStrategyId, strategyName);
+                    
+                    if (compileSuccess) {
+                        log.info("第{}个AI策略生成并编译成功，策略代码: {}, 策略名称: {}", i + 1, uniqueStrategyId, strategyName);
+                    } else {
+                        log.warn("第{}个AI策略已保存但编译失败，策略代码: {}, 策略名称: {}", i + 1, uniqueStrategyId, strategyName);
+                    }
 
                 } catch (Exception e) {
                     String originalDescription = i < validDescriptions.size() ? validDescriptions.get(i) : "未知描述";
@@ -888,11 +916,22 @@ public class Ta4jBacktestController {
             return ApiResponse.error(500, "批量生成策略失败: " + e.getMessage());
         }
 
-        log.info("批量策略生成完成，成功: {}, 失败: {}",
-                generatedStrategies.size() - errorMessages.size(), errorMessages.size());
+        // 统计编译成功和失败的数量
+        long compileFailedCount = generatedStrategies.stream()
+                .filter(s -> s.getLoadError() != null && !s.getLoadError().isEmpty())
+                .count();
+        long compileSuccessCount = generatedStrategies.size() - errorMessages.size() - compileFailedCount;
+
+        log.info("批量策略生成完成，总数: {}, 编译成功: {}, 编译失败: {}, 生成失败: {}",
+                generatedStrategies.size(), compileSuccessCount, compileFailedCount, errorMessages.size());
 
         if (!errorMessages.isEmpty()) {
-            log.warn("部分策略生成失败: {}", String.join("; ", errorMessages));
+            log.warn("部分策略处理失败: {}", String.join("; ", errorMessages));
+            return ApiResponse.success(generatedStrategies, 
+                String.format("策略生成完成，但有 %d 个策略编译失败，%d 个策略生成失败", compileFailedCount, errorMessages.size()));
+        } else if (compileFailedCount > 0) {
+            return ApiResponse.success(generatedStrategies, 
+                String.format("策略已保存，但有 %d 个策略编译失败，请查看错误信息", compileFailedCount));
         }
 
         return ApiResponse.success(generatedStrategies);
@@ -920,11 +959,14 @@ public class Ta4jBacktestController {
                 return ApiResponse.error(404, "策略不存在: " + request.getId());
             }
 
-            if (existingStrategyOpt.get().getSourceCode().isEmpty()) {
-                return ApiResponse.error(405, "预添加策略不支持更新: " + request.getId());
-            }
-
             StrategyInfoEntity existingStrategy = existingStrategyOpt.get();
+            
+            // 检查是否为预置策略（sourceCode为空或null表示预置策略）
+            if (existingStrategy.getSourceCode() == null || existingStrategy.getSourceCode().trim().isEmpty()) {
+                log.warn("尝试更新预置策略被拒绝，策略ID: {}, 策略代码: {}", 
+                    request.getId(), existingStrategy.getStrategyCode());
+                return ApiResponse.error(403, "预置策略不允许更新，只有用户生成的策略才能更新");
+            }
 
             // 获取历史对话记录
             String conversationContext = strategyConversationService.buildConversationContext(existingStrategy.getId());
@@ -955,25 +997,41 @@ public class Ta4jBacktestController {
 
             // 重新编译并加载策略 - 使用智能编译服务
             String compileError = null;
+            boolean compileSuccess = true;
             try {
                 smartDynamicStrategyService.compileAndLoadStrategy(newGeneratedCode, updatedStrategy);
+                log.info("策略编译成功，策略代码: {}", existingStrategy.getStrategyCode());
             } catch (Exception compileException) {
+                compileSuccess = false;
                 compileError = compileException.getMessage();
-                log.warn("智能编译服务失败，保存错误记录: {}", compileError);
+                // 保存编译错误到strategy_info表的load_error字段
+                updatedStrategy.setLoadError(compileError);
+                strategyInfoService.saveStrategy(updatedStrategy);
+                log.error("策略编译失败，策略代码: {}, 错误: {}", existingStrategy.getStrategyCode(), compileError);
             }
 
-            // 保存完整的对话记录到strategy_conversation表（包含编译错误信息）
+            // 从AI响应中提取原始代码（保持换行格式）
+            String originalCode = extractOriginalCode(newGeneratedCode);
+
+            // 保存完整的对话记录到strategy_conversation表（始终包含编译错误信息和原始代码）
             StrategyConversationEntity conversation = StrategyConversationEntity.builder()
                     .strategyId(existingStrategy.getId())
                     .userInput(request.getDescription())
                     .aiResponse(strategyInfo.toJSONString())
                     .conversationType("update")
-                    .compileError(compileError)
+                    .compileError(compileError)  // 始终保存，即使为null
+                    .originalCode(originalCode)  // 保存格式化的原始代码
                     .build();
             strategyConversationService.saveConversation(conversation);
 
-            log.info("策略更新成功，策略代码: {}", existingStrategy.getStrategyCode());
-            return ApiResponse.success(updatedStrategy);
+            if (compileSuccess) {
+                log.info("策略更新并编译成功，策略代码: {}", existingStrategy.getStrategyCode());
+                return ApiResponse.success(updatedStrategy);
+            } else {
+                log.warn("策略已更新但编译失败，策略代码: {}", existingStrategy.getStrategyCode());
+                // 返回成功但带有编译错误信息
+                return ApiResponse.success(updatedStrategy, "策略已更新但编译失败: " + compileError);
+            }
 
         } catch (Exception e) {
             log.error("更新策略失败: {}", e.getMessage(), e);
@@ -1076,5 +1134,30 @@ public class Ta4jBacktestController {
             log.error("获取资金曲线数据时发生错误: {}", e.getMessage(), e);
             return ApiResponse.error(500, "获取资金曲线数据时发生错误: " + e.getMessage());
         }
+    }
+
+
+    /**
+     * 从生成的代码中提取原始代码，并格式化为可读格式
+     * 将转义的换行符 \n 转换为真实的换行符
+     * 
+     * @param generatedCode AI生成的代码（可能包含 \n 转义符）
+     * @return 格式化后的代码（包含真实换行符）
+     */
+    private String extractOriginalCode(String generatedCode) {
+        if (generatedCode == null || generatedCode.isEmpty()) {
+            return "";
+        }
+        
+        // 将 \n 转换为真实的换行符
+        String formattedCode = generatedCode.replace("\\n", "\n");
+        
+        // 将 \t 转换为真实的制表符
+        formattedCode = formattedCode.replace("\\t", "\t");
+        
+        // 将 \" 转换为真实的引号
+        formattedCode = formattedCode.replace("\\\"", "\"");
+        
+        return formattedCode;
     }
 }

@@ -3,6 +3,7 @@ package com.okx.trading.strategy;
 import com.okx.trading.util.Ta4jNumUtil;
 import org.ta4j.core.*;
 import org.ta4j.core.indicators.*;
+import org.ta4j.core.indicators.averages.EMAIndicator;
 import org.ta4j.core.indicators.averages.SMAIndicator;
 import org.ta4j.core.indicators.helpers.*;
 import org.ta4j.core.indicators.statistics.StandardDeviationIndicator;

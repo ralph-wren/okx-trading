@@ -765,20 +765,33 @@ public class SmartDynamicStrategyService {
             code = code.replaceAll("new AndRule\\(\\s*([^,()]+),\\s*([^,()]+)\\s*\\)", "($1).and($2)");
             code = code.replaceAll("new OrRule\\(\\s*([^,()]+),\\s*([^,()]+)\\s*\\)", "($1).or($2)");
                 
-            // 修复Num.valueOf() - 改为series.numOf()
-            code = code.replaceAll("Num\\.valueOf\\((\\w+)\\)", "series.numOf($1)");
-            code = code.replaceAll("Num\\.valueOf\\((\\d+)\\)", "series.numOf($1)");
-            code = code.replaceAll("DecimalNum\\.valueOf\\((\\w+)\\)", "series.numOf($1)");
-            code = code.replaceAll("DecimalNum\\.valueOf\\((\\d+)\\)", "series.numOf($1)");
-            code = code.replaceAll("Decimal\\.valueOf\\((\\w+)\\)", "series.numOf($1)");
-            code = code.replaceAll("Decimal\\.valueOf\\(([\\d.]+)\\)", "series.numOf($1)");
+            // 修复Num.valueOf() - 改为直接使用数值（不需要series.numOf()）
+            code = code.replaceAll("Num\\.valueOf\\((\\w+)\\)", "$1");
+            code = code.replaceAll("Num\\.valueOf\\((\\d+)\\)", "$1");
+            code = code.replaceAll("DecimalNum\\.valueOf\\((\\w+)\\)", "$1");
+            code = code.replaceAll("DecimalNum\\.valueOf\\((\\d+)\\)", "$1");
+            code = code.replaceAll("Decimal\\.valueOf\\((\\w+)\\)", "$1");
+            code = code.replaceAll("Decimal\\.valueOf\\(([\\d.]+)\\)", "$1");
             
-            // 修复直接数字转换的问题
-            code = code.replaceAll("new UnderIndicatorRule\\(([^,]+),\\s*(\\d+)\\)", "new UnderIndicatorRule($1, series.numOf($2))");
-            code = code.replaceAll("new OverIndicatorRule\\(([^,]+),\\s*(\\d+)\\)", "new OverIndicatorRule($1, series.numOf($2))");
+            // **关键修复：移除所有错误的series.numOf()调用**
+            // ta4j的Rule类（如UnderIndicatorRule、OverIndicatorRule等）可以直接接受数值和指标，不需要series.numOf()包装
             
-            // 修复布林带指标构造函数中的变量转换问题
-            code = code.replaceAll("(BollingerBands(?:Upper|Lower)Indicator\\([^,]+,\\s*[^,]+,\\s*)(\\w+)(\\))", "$1series.numOf($2)$3");
+            // 1. 移除指标对象的series.numOf()包装
+            code = code.replaceAll("series\\.numOf\\(([a-zA-Z_][a-zA-Z0-9_]*(?:Sma|Ema|Rsi|Macd|Volume|Indicator))\\)", "$1");
+            
+            // 2. 移除数值变量的series.numOf()包装（如rsiOverbought、rsiOversold等）
+            code = code.replaceAll("series\\.numOf\\(([a-zA-Z_][a-zA-Z0-9_]*)\\)", "$1");
+            
+            // 3. 移除数值常量的series.numOf()包装
+            code = code.replaceAll("series\\.numOf\\((\\d+)\\)", "$1");
+            code = code.replaceAll("series\\.numOf\\(([\\d.]+)\\)", "$1");
+            
+            // 4. 特别处理Rule构造函数中的series.numOf()
+            code = code.replaceAll("new UnderIndicatorRule\\(([^,]+),\\s*series\\.numOf\\(([^)]+)\\)\\)", "new UnderIndicatorRule($1, $2)");
+            code = code.replaceAll("new OverIndicatorRule\\(([^,]+),\\s*series\\.numOf\\(([^)]+)\\)\\)", "new OverIndicatorRule($1, $2)");
+            
+            // 5. 修复布林带指标构造函数中的变量转换问题
+            code = code.replaceAll("(BollingerBands(?:Upper|Lower)Indicator\\([^,]+,\\s*[^,]+,\\s*)series\\.numOf\\((\\w+)\\)(\\))", "$1$2$3");
             
             // 修复复杂的AndRule和OrRule - 处理嵌套参数
             // 修复四参数AndRule的具体情况
@@ -800,7 +813,7 @@ public class SmartDynamicStrategyService {
             return code;
         } catch (Exception e) {
             System.err.println("Error fixing rule combination: " + e.getMessage());
-        return code;
+            return code;
         }
     }
 
@@ -838,19 +851,9 @@ public class SmartDynamicStrategyService {
             // RSI构造函数应该是 RSIIndicator(Indicator<Num>, int)
             // 确保RSI参数正确
             
-            // 2. 修复RSI阈值比较中的数字常量问题
-            // 将纯数字转换为series.numOf()调用
-            code = code.replaceAll("new UnderIndicatorRule\\(([^,]+),\\s*(\\d+)\\)", 
-                "new UnderIndicatorRule($1, series.numOf($2))");
-            code = code.replaceAll("new OverIndicatorRule\\(([^,]+),\\s*(\\d+)\\)", 
-                "new OverIndicatorRule($1, series.numOf($2))");
+            // 2. ta4j的Rule类可以直接接受数值，不需要series.numOf()包装
+            // 移除这些错误的转换，让fixRuleCombination方法统一处理
             
-            // 修复变量形式的阈值
-            code = code.replaceAll("new UnderIndicatorRule\\(([^,]+),\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\)", 
-                "new UnderIndicatorRule($1, series.numOf($2))");
-            code = code.replaceAll("new OverIndicatorRule\\(([^,]+),\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\)", 
-                "new OverIndicatorRule($1, series.numOf($2))");
-
             // 3. 修复RSI相关的import
             if (!code.contains("import org.ta4j.core.indicators.RSIIndicator")) {
                 code = code.replaceFirst("import org.ta4j.core.rules.*;",
