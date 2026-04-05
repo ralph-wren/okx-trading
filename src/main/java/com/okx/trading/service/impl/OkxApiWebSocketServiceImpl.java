@@ -13,10 +13,7 @@ import com.okx.trading.model.market.Candlestick;
 import com.okx.trading.model.market.Ticker;
 import com.okx.trading.model.trade.Order;
 import com.okx.trading.model.trade.OrderRequest;
-import com.okx.trading.service.KlineCacheService;
-import com.okx.trading.service.NotificationService;
-import com.okx.trading.service.OkxApiService;
-import com.okx.trading.service.RedisCacheService;
+import com.okx.trading.service.*;
 import com.okx.trading.strategy.RealTimeStrategyManager;
 import com.okx.trading.util.BigDecimalUtil;
 import com.okx.trading.util.HttpUtil;
@@ -90,6 +87,9 @@ public class OkxApiWebSocketServiceImpl implements OkxApiService {
 
     @Autowired
     private NotificationService emailNotificationService;
+
+    @Autowired
+    private KlineKafkaProducerService klineKafkaProducerService;
 
     // 缓存和回调
     private final Map<String, CompletableFuture<Ticker>> tickerFutures = new ConcurrentHashMap<>();
@@ -206,18 +206,31 @@ public class OkxApiWebSocketServiceImpl implements OkxApiService {
 
                 if (candlestick != null) {
                     candlestick.setIntervalVal(interval);
-//                    redisCacheService.updateCandlestick(candlestick);
-//                    redisCacheService.updateCoinPrice(symbol, candlestick.getClose());
 
-                    // 更新邮件通知服务的最新价格
-                    emailNotificationService.updateLatestPrice(symbol, candlestick.getClose());
+                    // 检查是否启用 Kafka 缓冲
+                    if (klineKafkaProducerService.isEnabled()) {
+                        // 启用 Kafka：将原始数据发送到 Kafka，由消费者处理
+                        JSONObject klineDataJson = new JSONObject();
+                        klineDataJson.put("ts", candleData.getLongValue(0));
+                        klineDataJson.put("o", candleData.getString(1));
+                        klineDataJson.put("h", candleData.getString(2));
+                        klineDataJson.put("l", candleData.getString(3));
+                        klineDataJson.put("c", candleData.getString(4));
+                        klineDataJson.put("vol", candleData.getString(5));
+                        
+                        klineKafkaProducerService.sendKlineData(symbol, interval, klineDataJson);
+                        log.debug("📤 K线数据已发送到 Kafka: symbol={}, interval={}", symbol, interval);
+                    } else {
+                        // 未启用 Kafka：直接处理（原有逻辑）
+                        // 更新邮件通知服务的最新价格
+                        emailNotificationService.updateLatestPrice(symbol, candlestick.getClose());
 
-                    log.debug("获取实时标记价格k线数据: {}", candlestick);
-//                    candlesticks.add(candlestick);
+                        log.debug("获取实时标记价格k线数据: {}", candlestick);
 
-                    // 通知实时策略管理器处理新的K线数据
-                    if (realTimeStrategyManager != null) {
-                        realTimeStrategyManager.handleNewKlineData(symbol, interval, candlestick);
+                        // 通知实时策略管理器处理新的K线数据
+                        if (realTimeStrategyManager != null) {
+                            realTimeStrategyManager.handleNewKlineData(symbol, interval, candlestick);
+                        }
                     }
                 }
             }

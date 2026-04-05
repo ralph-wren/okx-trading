@@ -44,6 +44,12 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
+        <!-- Spring Kafka - K线数据缓冲 -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
         <!-- Ta4j - 技术分析回测框架 -->
         <dependency>
             <groupId>org.ta4j</groupId>
