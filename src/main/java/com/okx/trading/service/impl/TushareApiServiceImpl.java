@@ -490,14 +490,18 @@ public class TushareApiServiceImpl implements TushareApiService {
             case "12h":
                 return openTime.plusHours(12);
             case "1d":
-                return openTime.plusDays(1);
+                return openTime.plusDays(1).minusSeconds(1); // 当天23:59:59
             case "1w":
-                return openTime.plusWeeks(1);
+                // 周线：从周一到周日23:59:59
+                return openTime.plusWeeks(1).minusSeconds(1);
+            case "1m":
+                // 月线：从1号到月底23:59:59
+                return openTime.plusMonths(1).minusSeconds(1);
             case "1mon":
-                return openTime.plusMonths(1);
+                return openTime.plusMonths(1).minusSeconds(1);
             default:
                 // 默认加1天
-                return openTime.plusDays(1);
+                return openTime.plusDays(1).minusSeconds(1);
         }
     }
 
@@ -509,9 +513,22 @@ public class TushareApiServiceImpl implements TushareApiService {
             // 分钟线: yyyy-MM-dd HH:mm:ss
             return LocalDateTime.parse(timeStr, DATETIME_FORMATTER);
         } else {
-            // 日线: yyyyMMdd
-            return LocalDateTime.parse(timeStr + " 00:00:00", 
+            // 日线/周线/月线: yyyyMMdd
+            LocalDateTime dateTime = LocalDateTime.parse(timeStr + " 00:00:00", 
                     DateTimeFormatter.ofPattern("yyyyMMdd HH:mm:ss"));
+            
+            // 对于周线，调整到该周的周一
+            if ("1W".equalsIgnoreCase(interval)) {
+                // Tushare返回的是该周的最后一个交易日，我们需要调整到周一
+                dateTime = dateTime.with(java.time.DayOfWeek.MONDAY);
+            }
+            // 对于月线，调整到该月的1号
+            else if ("1M".equalsIgnoreCase(interval)) {
+                // Tushare返回的是该月的最后一个交易日，我们需要调整到1号
+                dateTime = dateTime.withDayOfMonth(1);
+            }
+            
+            return dateTime;
         }
     }
 
