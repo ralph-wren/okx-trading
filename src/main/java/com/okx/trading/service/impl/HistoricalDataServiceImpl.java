@@ -812,14 +812,47 @@ public class HistoricalDataServiceImpl implements HistoricalDataService {
      */
     private List<LocalDateTime> generateExpectedTimePoints(String interval, LocalDateTime startTime, LocalDateTime endTime) {
         List<LocalDateTime> timePoints = new ArrayList<>();
-        endTime = endTime;
-
-        long intervalMinutes = getIntervalMinutes(interval);
-
-        LocalDateTime current = startTime;
-        while (!current.isAfter(endTime)) {
-            timePoints.add(current);
-            current = current.plusMinutes(intervalMinutes);
+        
+        // 判断是否为周线或月线
+        boolean isWeekly = "1W".equalsIgnoreCase(interval);
+        boolean isMonthly = "1M".equalsIgnoreCase(interval);
+        
+        if (isWeekly) {
+            // 周线：按自然周计算（周一00:00:00为一周的开始）
+            LocalDateTime current = startTime;
+            // 调整到当前周的周一00:00:00
+            current = current.with(java.time.DayOfWeek.MONDAY)
+                    .withHour(0).withMinute(0).withSecond(0).withNano(0);
+            
+            while (!current.isAfter(endTime)) {
+                if (!current.isBefore(startTime)) {
+                    timePoints.add(current);
+                }
+                // 移动到下一周的周一
+                current = current.plusWeeks(1);
+            }
+        } else if (isMonthly) {
+            // 月线：按自然月计算（每月1号00:00:00为一个月的开始）
+            LocalDateTime current = startTime;
+            // 调整到当前月的1号00:00:00
+            current = current.withDayOfMonth(1)
+                    .withHour(0).withMinute(0).withSecond(0).withNano(0);
+            
+            while (!current.isAfter(endTime)) {
+                if (!current.isBefore(startTime)) {
+                    timePoints.add(current);
+                }
+                // 移动到下一个月的1号
+                current = current.plusMonths(1);
+            }
+        } else {
+            // 其他周期：按固定分钟数计算
+            long intervalMinutes = getIntervalMinutes(interval);
+            LocalDateTime current = startTime;
+            while (!current.isAfter(endTime)) {
+                timePoints.add(current);
+                current = current.plusMinutes(intervalMinutes);
+            }
         }
 
         return timePoints;
@@ -1384,13 +1417,39 @@ public class HistoricalDataServiceImpl implements HistoricalDataService {
 
     public List<String> calculateTimeRangePoints(LocalDateTime startTime, LocalDateTime endTime, String interval) {
         List<String> timePoints = new ArrayList<>();
-        while (startTime.isBefore(endTime)) {
-            timePoints.add(endTime.format(dateFormat));
-            endTime = endTime.minusMinutes(getIntervalMinutes(interval));
+        
+        // 判断是否为周线或月线
+        boolean isWeekly = "1W".equalsIgnoreCase(interval);
+        boolean isMonthly = "1M".equalsIgnoreCase(interval);
+        
+        if (isWeekly) {
+            // 周线：按自然周计算（周一到周日）
+            LocalDateTime current = endTime;
+            while (current.isAfter(startTime) || current.isEqual(startTime)) {
+                timePoints.add(current.format(dateFormat));
+                // 减去一周，移动到上一个周日
+                current = current.minusWeeks(1);
+            }
+        } else if (isMonthly) {
+            // 月线：按自然月计算（每月1号到月底）
+            LocalDateTime current = endTime;
+            while (current.isAfter(startTime) || current.isEqual(startTime)) {
+                timePoints.add(current.format(dateFormat));
+                // 减去一个月
+                current = current.minusMonths(1);
+            }
+        } else {
+            // 其他周期：按固定分钟数计算
+            LocalDateTime current = endTime;
+            while (current.isAfter(startTime)) {
+                timePoints.add(current.format(dateFormat));
+                current = current.minusMinutes(getIntervalMinutes(interval));
+            }
+            if (current.equals(startTime)) {
+                timePoints.add(current.format(dateFormat));
+            }
         }
-        if (startTime.equals(endTime)) {
-            timePoints.add(endTime.format(dateFormat));
-        }
+        
         return timePoints;
     }
 

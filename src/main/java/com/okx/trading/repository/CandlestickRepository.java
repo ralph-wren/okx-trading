@@ -28,7 +28,7 @@ public interface CandlestickRepository extends JpaRepository<CandlestickEntity, 
      * @param endTime 结束时间
      * @return K线数据列表
      */
-    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND c.intervalVal = :interval_val AND c.openTime BETWEEN :startTime AND :endTime ORDER BY c.openTime ASC")
+    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND BINARY(c.intervalVal) = BINARY(:interval_val) AND c.openTime BETWEEN :startTime AND :endTime ORDER BY c.openTime ASC")
     List<CandlestickEntity> findBySymbolAndIntervalAndOpenTimeBetweenOrderByOpenTimeAsc(
             @Param("symbol") String symbol, @Param("interval_val") String intervalVal,
             @Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
@@ -41,7 +41,7 @@ public interface CandlestickRepository extends JpaRepository<CandlestickEntity, 
      * @param interval 时间间隔
      * @return K线数据列表
      */
-    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND c.intervalVal = :interval_val ORDER BY c.openTime ASC")
+    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND BINARY(c.intervalVal) = BINARY(:interval_val) ORDER BY c.openTime ASC")
     List<CandlestickEntity> findBySymbolAndIntervalAsc(
             @Param("symbol") String symbol, @Param("interval_val") String intervalVal);
 
@@ -54,7 +54,7 @@ public interface CandlestickRepository extends JpaRepository<CandlestickEntity, 
      * @param pageable 分页参数
      * @return K线数据列表
      */
-    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND c.intervalVal = :interval_val ORDER BY c.openTime DESC")
+    @Query("SELECT c FROM CandlestickEntity c WHERE c.symbol = :symbol AND BINARY(c.intervalVal) = BINARY(:interval_val) ORDER BY c.openTime DESC")
     List<CandlestickEntity> findLatestBySymbolAndInterval(
             @Param("symbol") String symbol, @Param("interval_val") String intervalVal, Pageable pageable);
 
@@ -67,7 +67,7 @@ public interface CandlestickRepository extends JpaRepository<CandlestickEntity, 
      * @param endTime 结束时间
      * @return 已存在的K线开盘时间列表
      */
-    @Query("SELECT c.openTime FROM CandlestickEntity c WHERE c.symbol = :symbol AND c.intervalVal = :interval_val AND c.openTime >= :startTime AND c.openTime < :endTime ORDER BY c.openTime ASC")
+    @Query("SELECT c.openTime FROM CandlestickEntity c WHERE c.symbol = :symbol AND BINARY(c.intervalVal) = BINARY(:interval_val) AND c.openTime >= :startTime AND c.openTime < :endTime ORDER BY c.openTime ASC")
     List<LocalDateTime> findExistingOpenTimesBySymbolAndIntervalBetween(
             @Param("symbol") String symbol, @Param("interval_val") String intervalVal,
             @Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);
@@ -83,7 +83,7 @@ public interface CandlestickRepository extends JpaRepository<CandlestickEntity, 
      */
     @Modifying
     @Transactional
-    @Query("DELETE FROM CandlestickEntity c WHERE c.symbol = :symbol AND c.intervalVal = :interval_val AND c.openTime BETWEEN :startTime AND :endTime")
+    @Query("DELETE FROM CandlestickEntity c WHERE c.symbol = :symbol AND BINARY(c.intervalVal) = BINARY(:interval_val) AND c.openTime BETWEEN :startTime AND :endTime")
     int deleteBySymbolAndIntervalAndOpenTimeBetween(
             @Param("symbol") String symbol, @Param("interval_val") String intervalVal,
             @Param("startTime") LocalDateTime startTime, @Param("endTime") LocalDateTime endTime);

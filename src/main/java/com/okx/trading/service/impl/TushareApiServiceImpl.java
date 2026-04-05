@@ -521,6 +521,12 @@ public class TushareApiServiceImpl implements TushareApiService {
     private boolean isMinuteInterval(String interval) {
         if (interval == null) return false;
         String lower = interval.toLowerCase();
+        
+        // 先排除周线和月线
+        if ("1w".equals(lower) || "1m".equals(lower)) {
+            return false;
+        }
+        
         // 分钟级别：1m, 5m, 15m, 30m, 1min, 5min等
         // 小时级别：1h, 2h, 4h, 6h, 12h等（Tushare用60min接口处理）
         boolean isMinute = lower.contains("min") || 

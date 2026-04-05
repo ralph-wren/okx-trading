@@ -284,9 +284,17 @@ public class MarketController {
         log.info("收到历史数据查询请求: symbol={}, interval={}, startTime={}, endTime={}", 
                 symbol, interval, startTimeStr, endTimeStr);
         
+        // 添加详细的interval参数日志
+        log.info("interval参数详情: 原始值='{}', 长度={}, 最后一个字符='{}', 大小写检查: M={}, m={}", 
+                interval, interval.length(), 
+                interval.substring(interval.length() - 1),
+                interval.endsWith("M"), interval.endsWith("m"));
+        
         try {
             // 判断是否为股票代码（格式：XXXXXX.SZ 或 XXXXXX.SH）
             boolean isStock = symbol.matches("^\\d{6}\\.(SZ|SH)$");
+            
+            log.info("判断交易对类型: symbol={}, isStock={}", symbol, isStock);
             
             if (isStock) {
                 // 股票：调用Tushare API
@@ -311,6 +319,7 @@ public class MarketController {
                 return ApiResponse.success(entities);
             } else {
                 // 加密货币：使用原有逻辑
+                log.info("检测到加密货币: {}, 使用OKX API获取数据, interval={}", symbol, interval);
                 List<CandlestickEntity> candlestickEntities = historicalDataService
                         .fetchAndSaveHistoryWithIntegrityCheck(symbol, interval, startTimeStr, endTimeStr);
                 return ApiResponse.success(candlestickEntities);
