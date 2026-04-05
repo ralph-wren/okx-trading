@@ -89,10 +89,10 @@ public class DeepSeekApiService {
             + "   - 代码要简洁且可编译\n"
             + "   - 在方法开头进行数据点检查：if (series.getBarCount() <= period) throw new IllegalArgumentException(\"数据点不足以计算指标\")\n"
             + "   - 最后返回：return new BaseStrategy(entryRule, exitRule)\n"
-            + "   - 【关键约束】只能使用现有的Ta4j指标类，如SMAIndicator、EMAIndicator、RSIIndicator、VolumeIndicator等\n"
+            + "   - 【关键约束】只能使用 Ta4j 0.18 中真实存在的指标类（如 SMAIndicator/EMAIndicator 在 averages 子包，写短名即可）\n"
             + "   - 【关键约束】只能使用简单的规则组合，不要创建复杂的数学运算\n"
-            + "   - 【关键约束】不需要import语句，直接生成类代码\n"
-            + "   - 常用指标：SMAIndicator、EMAIndicator、RSIIndicator、VolumeIndicator、OnBalanceVolumeIndicator等\n"
+            + "   - 【关键约束】不需要 import 语句，直接生成类代码\n"
+            + "   - 常用指标：SMAIndicator、EMAIndicator、RSIIndicator、MACDIndicator、VolumeIndicator、OnBalanceVolumeIndicator、ClosePriceIndicator\n"
             + "   - 常用规则：CrossedUpIndicatorRule、CrossedDownIndicatorRule、OverIndicatorRule、UnderIndicatorRule\n"
             + "   - 【重要】所有策略都必须严格按照以下模板格式编写：\n"
             + "   ```java\n"
@@ -125,7 +125,7 @@ public class DeepSeekApiService {
             + "   - 任何super()调用：super(entryRule, exitRule)\n"
             + "   - 任何内部类、匿名类或自定义指标类\n"
             + "   - 任何复杂的数学运算和类型转换\n"
-            + "   - 使用getValue()方法获取动态值\n"
+            + "   - 禁止手写逐 K 线遍历并用 getValue(index) 拼交易逻辑；应使用 Indicator + Rule\n"
             + "   - 任何除了静态方法之外的其他方法\n"
             + "2. 【必须遵循】代码结构：\n"
             + "   - 只能有一个静态方法：public static Strategy createXxxStrategy(BarSeries series)\n"
@@ -157,6 +157,22 @@ public class DeepSeekApiService {
             + "   }\n"
             + "5. 【编译错误修复】如果涉及复杂指标，改用简单的SMA/EMA交叉策略\n"
             + "6. 【再次强调】绝对不能生成继承BaseStrategy的格式，只能生成包含静态方法的格式！\n";
+
+    /**
+     * Ta4j 0.18 与项目动态编译环境说明，避免模型按旧版/错误包名生成不可编译代码。
+     */
+    private void appendTa4j018RuntimeSpec(StringBuilder sb) {
+        sb.append("【Ta4j 版本与 API：必须与当前工程一致 — Maven 依赖 ta4j-core 0.18】\n");
+        sb.append("- 仅使用包名 org.ta4j.core.*，禁止使用已废弃的 eu.verdelhan.ta4j。\n");
+        sb.append("- SMAIndicator、EMAIndicator 等均线类在子包 indicators.averages；代码里写短类名即可（编译时会自动 import averages.*）。\n");
+        sb.append("- VolumeIndicator 在 indicators.helpers；OnBalanceVolumeIndicator 在 indicators.volume。\n");
+        sb.append("- 价格源：ClosePriceIndicator closePrice = new ClosePriceIndicator(series)。\n");
+        sb.append("- RSI：new RSIIndicator(new ClosePriceIndicator(series), period)。\n");
+        sb.append("- MACD：new MACDIndicator(new ClosePriceIndicator(series), shortPeriod, longPeriod)；禁止写成 new MACDIndicator(shortEma, longEma)。\n");
+        sb.append("- 与数值常量比较时用 series.numOf，例如 new UnderIndicatorRule(rsi, series.numOf(30))。\n");
+        sb.append("- 策略对象：return new BaseStrategy(entryRule, exitRule)。\n");
+        sb.append("- 不要编造指标类名；不确定时只用 SMA/EMA 交叉 + 上文模板中的指标。\n\n");
+    }
 
     /**
      * 更新策略（带对话上下文）
@@ -206,6 +222,8 @@ public class DeepSeekApiService {
      */
     private String buildCompleteStrategyPrompt(String strategyDescription, String currentStrategy, String conversationContext) {
         StringBuilder promptBuilder = new StringBuilder();
+
+        appendTa4j018RuntimeSpec(promptBuilder);
 
         // 强制开头声明格式要求
         promptBuilder.append("【强制格式要求 - 必须严格遵守】\n");
@@ -263,6 +281,8 @@ public class DeepSeekApiService {
     private String buildBatchCompleteStrategyPrompt(String[] strategyDescriptions) {
         StringBuilder promptBuilder = new StringBuilder();
         promptBuilder.append("请根据以下多个策略描述，一次性生成多个完整的Ta4j交易策略信息，返回JSON数组格式：\n\n");
+
+        appendTa4j018RuntimeSpec(promptBuilder);
 
         promptBuilder.append("需要生成的策略描述列表：\n");
         for (int i = 0; i < strategyDescriptions.length; i++) {

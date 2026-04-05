@@ -5,7 +5,6 @@ import com.okx.trading.repository.StrategyInfoRepository;
 import com.okx.trading.service.StrategyInfoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -78,9 +77,7 @@ public class StrategyInfoServiceImpl implements StrategyInfoService {
         Map<String, Map<String, Object>> result = new HashMap<>();
 
         for (StrategyInfoEntity strategy : strategies) {
-            if(StringUtils.isNotBlank(strategy.getLoadError())){
-                continue;
-            }
+            // 有 load_error 的策略也返回，由前端根据 available /「隐藏不可用」控制是否展示
             Map<String, Object> strategyInfo = new HashMap<>();
             strategyInfo.put("id", String.valueOf(strategy.getId()));
             strategyInfo.put("name", strategy.getStrategyName());

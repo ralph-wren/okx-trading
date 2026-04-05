@@ -186,8 +186,9 @@ public class DynamicStrategyService {
         imports.append("import org.ta4j.core.analysis.criteria.*;\n");
         imports.append("import org.ta4j.core.cost.*;\n");
         
-        // 指标类
+        // 指标类（0.18：均线类在 averages 子包）
         imports.append("import org.ta4j.core.indicators.*;\n");
+        imports.append("import org.ta4j.core.indicators.averages.*;\n");
         imports.append("import org.ta4j.core.indicators.bollinger.*;\n");
         imports.append("import org.ta4j.core.indicators.keltner.*;\n");
         imports.append("import org.ta4j.core.indicators.ichimoku.*;\n");
@@ -246,6 +247,7 @@ public class DynamicStrategyService {
         classBodyEvaluator.setDefaultImports(new String[]{
                 "org.ta4j.core.*",
                 "org.ta4j.core.indicators.*",
+                "org.ta4j.core.indicators.averages.*",
                 "org.ta4j.core.indicators.bollinger.*",
                 "org.ta4j.core.indicators.keltner.*",
                 "org.ta4j.core.indicators.ichimoku.*",

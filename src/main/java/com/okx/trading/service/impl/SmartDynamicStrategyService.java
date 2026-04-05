@@ -1403,9 +1403,10 @@ public class SmartDynamicStrategyService {
                     "import org.ta4j.core.rules.*;\nimport org.ta4j.core.indicators.helpers.ClosePriceIndicator;");
             }
             
-            if (code.contains("VolumeIndicator") && !code.contains("import org.ta4j.core.indicators.volume.VolumeIndicator")) {
+            // Ta4j 0.18：VolumeIndicator 在 helpers，不在 volume 子包
+            if (code.contains("VolumeIndicator") && !code.contains("helpers.VolumeIndicator")) {
                 code = code.replaceFirst("import org.ta4j.core.rules.*;",
-                    "import org.ta4j.core.rules.*;\nimport org.ta4j.core.indicators.volume.VolumeIndicator;");
+                    "import org.ta4j.core.rules.*;\nimport org.ta4j.core.indicators.helpers.VolumeIndicator;");
             }
             
             // 添加TradingRecord的import（自定义Rule需要）

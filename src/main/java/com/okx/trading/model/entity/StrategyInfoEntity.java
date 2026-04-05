@@ -25,9 +25,10 @@ public class StrategyInfoEntity {
     private Long id;
 
     /**
-     * 策略代码，如SMA, MACD等
+     * 策略唯一标识（可与回测表 strategy_code 关联）；AI 生成 + 去重后缀可能较长，需与库列长度一致
      */
-    @Column(name = "strategy_code", nullable = false, unique = true)
+    @Column(name = "strategy_code", nullable = false, unique = true,
+            columnDefinition = "VARCHAR(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
     private String strategyCode;
 
     /**

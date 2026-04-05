@@ -303,7 +303,7 @@ create table strategy_info
  description    text collate utf8mb4_unicode_ci null,
  comments       text collate utf8mb4_unicode_ci null,
  params_desc    text collate utf8mb4_unicode_ci null,
- strategy_code  varchar(50)                     not null,
+ strategy_code  varchar(500)                    not null,
  strategy_name  varchar(100) collate utf8mb4_unicode_ci not null,
  update_time    datetime                        not null,
  source_code    text                            null,

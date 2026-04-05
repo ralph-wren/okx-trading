@@ -12,14 +12,24 @@ import org.ta4j.core.Strategy;
 import javax.tools.*;
 import java.io.*;
 import java.lang.reflect.Field;
+import java.net.JarURLConnection;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.net.URLConnection;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * 基于Java Compiler API的动态策略服务
@@ -37,6 +47,11 @@ public class JavaCompilerDynamicStrategyService {
 
     // 临时编译目录
     private final Path tempCompileDir = Paths.get(System.getProperty("java.io.tmpdir"), "okx-trading-compiled-strategies");
+
+    /**
+     * Spring Boot 3.2+ fat jar 内 BOOT-INF/lib 下嵌套 jar 解压缓存，供 javac 使用（javac 无法直接读 nested: / 部分 jar: 嵌套路径）
+     */
+    private final Path nestedLibCacheDir = Paths.get(System.getProperty("java.io.tmpdir"), "okx-trading-nested-libs-cache");
 
     // Java编译器
     private final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -141,9 +156,10 @@ public class JavaCompilerDynamicStrategyService {
     private String prepareFullSourceCode(String strategyCode) {
         StringBuilder fullCode = new StringBuilder();
 
-        // 添加必要的import语句
+        // 添加必要的import语句（Ta4j 0.18：SMA/EMA 等在 indicators.averages 子包，通配符 indicators.* 无法覆盖子包）
         fullCode.append("import org.ta4j.core.*;\n");
         fullCode.append("import org.ta4j.core.indicators.*;\n");
+        fullCode.append("import org.ta4j.core.indicators.averages.*;\n");
         fullCode.append("import org.ta4j.core.indicators.helpers.*;\n");
         fullCode.append("import org.ta4j.core.indicators.bollinger.*;\n");
         fullCode.append("import org.ta4j.core.indicators.statistics.*;\n");
@@ -161,16 +177,169 @@ public class JavaCompilerDynamicStrategyService {
     }
 
     /**
-     * 构建类路径
+     * 构建 javac 可用的完整 classpath：包含 {@code java.class.path} 以及当前线程 / 本类 {@link URLClassLoader} 链上的所有 URL。
+     * <p>
+     * Spring Boot 可执行 jar 运行时依赖多在 {@link URLClassLoader#getURLs()} 中（含 {@code nested:} 协议），
+     * 仅靠 {@code java.class.path} 往往只有外层 jar，会导致动态编译找不到 Ta4j 等依赖。
+     * 对 {@code nested:} 及 jar 内嵌套 lib 条目会解压到临时目录后再加入 classpath。
      */
     private String buildClasspath() {
-        StringBuilder classpath = new StringBuilder();
+        LinkedHashSet<String> entries = new LinkedHashSet<>();
+        String jcp = System.getProperty("java.class.path", "");
+        if (!jcp.isBlank()) {
+            for (String part : jcp.split(File.pathSeparator)) {
+                if (!part.isBlank()) {
+                    entries.add(Paths.get(part).toAbsolutePath().normalize().toString());
+                }
+            }
+        }
+        addClasspathEntriesFromLoader(entries, Thread.currentThread().getContextClassLoader());
+        addClasspathEntriesFromLoader(entries, JavaCompilerDynamicStrategyService.class.getClassLoader());
+        String joined = String.join(File.pathSeparator, entries);
+        if (log.isDebugEnabled()) {
+            log.debug("动态策略编译 classpath 共 {} 个条目", entries.size());
+        }
+        return joined;
+    }
 
-        // 获取当前类加载器的类路径
-        String javaClassPath = System.getProperty("java.class.path");
-        classpath.append(javaClassPath);
+    /** 沿父链收集 {@link URLClassLoader} 的 URL，转为 javac 可识别的本地路径或解压后的 jar 路径 */
+    private void addClasspathEntriesFromLoader(Set<String> entries, ClassLoader loader) {
+        for (ClassLoader cl = loader; cl != null; cl = cl.getParent()) {
+            if (!(cl instanceof URLClassLoader urlCl)) {
+                continue;
+            }
+            for (URL url : urlCl.getURLs()) {
+                String entry = urlToClasspathEntry(url);
+                if (entry != null && !entry.isBlank()) {
+                    entries.add(entry);
+                }
+            }
+        }
+    }
 
-        return classpath.toString();
+    /**
+     * 将 ClassLoader 的 URL 转为 javac {@code -classpath} 片段。
+     */
+    private String urlToClasspathEntry(URL url) {
+        if (url == null) {
+            return null;
+        }
+        try {
+            String protocol = url.getProtocol();
+            if ("file".equalsIgnoreCase(protocol)) {
+                return Paths.get(url.toURI()).toAbsolutePath().normalize().toString();
+            }
+            if ("nested".equalsIgnoreCase(protocol)) {
+                return nestedUrlToExtractedJarPath(url);
+            }
+            if ("jar".equalsIgnoreCase(protocol)) {
+                return jarUrlToClasspathEntry(url);
+            }
+        } catch (Exception e) {
+            log.warn("无法将 URL 加入动态编译 classpath，已跳过: {}", url, e);
+        }
+        return null;
+    }
+
+    /**
+     * 解析 Spring Boot 3.2+ {@code nested:/path/app.jar/!BOOT-INF/lib/foo.jar}，解压内层 jar 到缓存目录。
+     *
+     * @see <a href="https://github.com/spring-projects/spring-boot/blob/main/spring-boot-project/spring-boot-tools/spring-boot-loader/src/main/java/org/springframework/boot/loader/net/protocol/nested/NestedLocation.java">NestedLocation</a>
+     */
+    private String nestedUrlToExtractedJarPath(URL nestedUrl) throws IOException {
+        String decoded = URLDecoder.decode(nestedUrl.toString().substring("nested:".length()), StandardCharsets.UTF_8);
+        int sep = decoded.lastIndexOf("/!");
+        if (sep < 0) {
+            return null;
+        }
+        String outerPathStr = decoded.substring(0, sep);
+        // Windows：nested:/C:/app.jar 形式下路径可能以 / 开头，需与 Spring NestedLocation 一致去掉前导 /
+        if (File.separatorChar == '\\' && outerPathStr.startsWith("/") && outerPathStr.length() > 2
+                && outerPathStr.charAt(2) == ':') {
+            outerPathStr = outerPathStr.substring(1);
+        }
+        Path outerJar = Paths.get(outerPathStr);
+        String zipEntryPath = decoded.substring(sep + 2);
+        if (zipEntryPath.endsWith("/")) {
+            zipEntryPath = zipEntryPath.substring(0, zipEntryPath.length() - 1);
+        }
+        if (!zipEntryPath.endsWith(".jar")) {
+            // 目录类条目（如 BOOT-INF/classes）由其他 URL 覆盖，javac 不需要单独嵌套目录
+            return null;
+        }
+        return extractZipEntryToCache(outerJar, zipEntryPath);
+    }
+
+    /**
+     * 处理 {@code jar:} URL：若指向整包则返回文件路径；若带 {@code !/} 内层 jar 条目则解压后返回路径。
+     */
+    private String jarUrlToClasspathEntry(URL jarUrl) throws IOException {
+        try {
+            URLConnection conn = jarUrl.openConnection();
+            if (conn instanceof JarURLConnection jarConn) {
+                URL jarFileUrl = jarConn.getJarFileURL();
+                Path outerPath = Paths.get(jarFileUrl.toURI()).toAbsolutePath().normalize();
+                String entryName = jarConn.getEntryName();
+                if (entryName != null && entryName.endsWith(".jar")) {
+                    return extractZipEntryToCache(outerPath, entryName);
+                }
+                return outerPath.toString();
+            }
+            // 非标准 JarURLConnection，尝试按字符串解析 jar:file:/path/!entry
+            String external = jarUrl.toExternalForm();
+            int schemeSep = external.indexOf(':');
+            if (schemeSep < 0) {
+                return null;
+            }
+            String rest = external.substring(schemeSep + 1);
+            if (!rest.startsWith("file:")) {
+                return null;
+            }
+            int bang = rest.indexOf("!/");
+            if (bang < 0) {
+                URL filePart = new URL(rest);
+                return Paths.get(filePart.toURI()).toAbsolutePath().normalize().toString();
+            }
+            String fileUrlPart = rest.substring(0, bang);
+            String entry = rest.substring(bang + 2);
+            if (entry.endsWith("/")) {
+                entry = entry.substring(0, entry.length() - 1);
+            }
+            Path outer = Paths.get(new URL(fileUrlPart).toURI()).toAbsolutePath().normalize();
+            if (entry.endsWith(".jar")) {
+                return extractZipEntryToCache(outer, entry);
+            }
+            return outer.toString();
+        } catch (URISyntaxException e) {
+            throw new IOException("无效的 jar URL: " + jarUrl, e);
+        }
+    }
+
+    /**
+     * 从外层 zip/jar 中解压指定条目到缓存（带同步，避免并发写坏文件）。
+     */
+    private synchronized String extractZipEntryToCache(Path outerJar, String zipEntryPath) throws IOException {
+        Files.createDirectories(nestedLibCacheDir);
+        long mtime = Files.getLastModifiedTime(outerJar).toMillis();
+        String cacheKey = outerJar.toAbsolutePath() + "|" + zipEntryPath + "|" + mtime;
+        String fileName = String.format("%08x__%s", cacheKey.hashCode(),
+                Paths.get(zipEntryPath).getFileName().toString().replaceAll("[^a-zA-Z0-9._-]", "_"));
+        Path target = nestedLibCacheDir.resolve(fileName);
+        if (!Files.exists(target) || Files.size(target) == 0L) {
+            try (ZipFile zf = new ZipFile(outerJar.toFile())) {
+                ZipEntry entry = zf.getEntry(zipEntryPath);
+                if (entry == null) {
+                    throw new IOException("ZIP 中不存在条目: " + zipEntryPath + " （外层: " + outerJar + "）");
+                }
+                try (InputStream in = zf.getInputStream(entry)) {
+                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            if (log.isDebugEnabled()) {
+                log.debug("已解压嵌套依赖供 javac 使用: {} -> {}", zipEntryPath, target);
+            }
+        }
+        return target.toAbsolutePath().normalize().toString();
     }
 
     /**
@@ -200,24 +369,14 @@ public class JavaCompilerDynamicStrategyService {
     /**
      * 从类代码中提取方法名
      */
+    private static final Pattern STATIC_STRATEGY_METHOD = Pattern.compile(
+            "public\\s+static\\s+Strategy\\s+(\\w+)\\s*\\(\\s*(?:final\\s+)?BarSeries\\s+\\w+\\s*\\)",
+            Pattern.MULTILINE);
+
     private String extractMethodName(String classCode) {
-        String[] lines = classCode.split("\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.contains("public static Strategy") && line.contains("(BarSeries series)")) {
-                // 寻找方法名：public static Strategy methodName(BarSeries series)
-                String[] parts = line.split("\\s+");
-                for (int i = 0; i < parts.length; i++) {
-                    if ("Strategy".equals(parts[i]) && i + 1 < parts.length) {
-                        String methodName = parts[i + 1];
-                        // 移除方法后面的括号
-                        if (methodName.contains("(")) {
-                            methodName = methodName.substring(0, methodName.indexOf("("));
-                        }
-                        return methodName;
-                    }
-                }
-            }
+        Matcher m = STATIC_STRATEGY_METHOD.matcher(classCode);
+        if (m.find()) {
+            return m.group(1);
         }
         throw new RuntimeException("无法从代码中提取方法名，请确保方法格式为：public static Strategy methodName(BarSeries series)");
     }
