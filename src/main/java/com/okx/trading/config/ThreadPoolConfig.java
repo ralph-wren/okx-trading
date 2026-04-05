@@ -151,4 +151,14 @@ public class ThreadPoolConfig{
         return Executors.newSingleThreadScheduledExecutor(
                 createThreadFactory("k线处理"));
     }
+
+    /**
+     * Kafka 监控线程池
+     * 用于定期检查 Kafka 数据新鲜度和消费者 lag
+     */
+    @Bean(name = "kafkaMonitorScheduler")
+    public ScheduledExecutorService kafkaMonitorScheduler(){
+        return Executors.newScheduledThreadPool(2,
+                createThreadFactory("Kafka监控"));
+    }
 }

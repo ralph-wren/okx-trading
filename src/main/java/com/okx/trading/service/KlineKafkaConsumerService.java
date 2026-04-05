@@ -38,6 +38,9 @@ public class KlineKafkaConsumerService {
     @Autowired
     private NotificationService emailNotificationService;
 
+    @Autowired(required = false)
+    private KafkaMonitorService kafkaMonitorService;
+
     /**
      * 消费 K线数据
      * 
@@ -59,6 +62,11 @@ public class KlineKafkaConsumerService {
         
         try {
             log.debug("📥 接收到 Kafka 消息: partition={}, offset={}", partition, offset);
+
+            // 更新监控服务的数据接收时间
+            if (kafkaMonitorService != null) {
+                kafkaMonitorService.updateLastDataReceivedTime();
+            }
 
             // 解析消息
             JSONObject messageObj = JSON.parseObject(message);

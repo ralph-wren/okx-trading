@@ -1,6 +1,7 @@
 package com.okx.trading.service.impl;
 
 import com.alibaba.fastjson.JSONObject;
+import com.okx.trading.service.KafkaMonitorService;
 import com.okx.trading.service.KlineKafkaProducerService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,9 @@ public class KlineKafkaProducerServiceImpl implements KlineKafkaProducerService 
 
     @Autowired
     private KafkaTemplate<String, String> kafkaTemplate;
+
+    @Autowired(required = false)
+    private KafkaMonitorService kafkaMonitorService;
 
     @Value("${kline.kafka.topic}")
     private String topic;
@@ -54,6 +58,11 @@ public class KlineKafkaProducerServiceImpl implements KlineKafkaProducerService 
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {
+                    // 更新监控服务的数据发送时间
+                    if (kafkaMonitorService != null) {
+                        kafkaMonitorService.updateLastDataReceivedTime();
+                    }
+                    
                     log.debug("✅ K线数据已发送到 Kafka: topic={}, partition={}, offset={}, key={}", 
                         topic, 
                         result.getRecordMetadata().partition(),
