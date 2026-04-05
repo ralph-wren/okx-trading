@@ -31,6 +31,7 @@ okx-trading/
 │   ├── main/          # 主要源代码
 │   └── test/          # 测试代码
 │       └── scripts/   # 测试脚本（Python等）
+├── ARCHITECTURE.md    # 🏗️ 系统架构文档
 ├── README.md          # 项目主文档
 └── ...
 ```
@@ -243,6 +244,82 @@ okx-trading/
 - **Docker**：容器化部署
 - **Docker Compose**：多容器编排
 - **Nginx**：反向代理(可选)
+
+## 🏗️ 系统架构
+
+详细的系统架构说明请查看 [ARCHITECTURE.md](ARCHITECTURE.md)，包含：
+- 完整的系统架构图
+- 各层级模块详解
+- 数据流图
+- 数据库设计
+- 部署架构
+- 性能优化策略
+
+### 整体架构图
+
+```mermaid
+graph TB
+    subgraph Frontend["前端层 (React)"]
+        UI1[策略工厂]
+        UI2[回测分析]
+        UI3[实盘交易]
+        UI4[资金中心]
+    end
+
+    subgraph Controller["控制器层 (Controllers)"]
+        C1[StrategyController]
+        C2[BacktestController]
+        C3[AccountController]
+        C4[MarketController]
+        C5[RealTimeStrategyController]
+    end
+
+    subgraph Service["服务层 (Services)"]
+        subgraph Trading["核心交易服务"]
+            S1[OkxApiService]
+            S2[RealTimeStrategyManager]
+            S3[OrderExecutionService]
+        end
+        
+        subgraph Backtest["回测与策略服务"]
+            S4[Ta4jBacktestService]
+            S5[StrategyCompilerService]
+            S6[DeepSeekApiService]
+        end
+        
+        subgraph Data["数据与缓存服务"]
+            S7[HistoricalDataService]
+            S8[KlineCacheService]
+            S9[RedisCacheService]
+        end
+        
+        subgraph Notification["通知与消息服务"]
+            S10[EmailNotificationService]
+            S11[TelegramScraperService]
+            S12[KafkaProducer/Consumer]
+        end
+    end
+
+    subgraph Repository["数据访问层 (Repository)"]
+        R1[StrategyRepository]
+        R2[BacktestRepository]
+        R3[CandlestickRepository]
+        R4[RealTimeStrategyRepository]
+    end
+
+    subgraph Storage["存储层 (Storage)"]
+        DB1[(MySQL)]
+        DB2[(Redis)]
+        DB3[Kafka]
+        DB4[OKX API]
+    end
+
+    Frontend --> Controller
+    Controller --> Service
+    Service --> Repository
+    Repository --> Storage
+    Service --> DB4
+```
 
 ## 🚀 快速开始
 
