@@ -1112,6 +1112,14 @@ public class Ta4jBacktestController {
                 return ApiResponse.error(404, "策略不存在: " + strategyCode);
             }
 
+            StrategyInfoEntity strategy = existingStrategyOpt.get();
+            
+            // 检查是否为预置策略（source_code为空或null表示预置策略）
+            if (strategy.getSourceCode() == null || strategy.getSourceCode().trim().isEmpty()) {
+                log.warn("尝试删除预置策略被拒绝，策略代码: {}", strategyCode);
+                return ApiResponse.error(403, "预置策略不允许删除，只有用户生成的策略才能删除");
+            }
+
             // 从动态策略缓存中移除
             dynamicStrategyService.removeStrategy(strategyCode);
 
