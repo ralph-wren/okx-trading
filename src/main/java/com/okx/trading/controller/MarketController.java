@@ -281,13 +281,16 @@ public class MarketController {
             @NotBlank(message = "开始时间不能为空") @RequestParam String startTimeStr,
             @NotBlank(message = "结束时间不能为空") @RequestParam String endTimeStr) {
 
+        log.info("收到历史数据查询请求: symbol={}, interval={}, startTime={}, endTime={}", 
+                symbol, interval, startTimeStr, endTimeStr);
+        
         try {
             // 判断是否为股票代码（格式：XXXXXX.SZ 或 XXXXXX.SH）
             boolean isStock = symbol.matches("^\\d{6}\\.(SZ|SH)$");
             
             if (isStock) {
                 // 股票：调用Tushare API
-                log.info("检测到股票代码: {}, 使用Tushare API获取数据", symbol);
+                log.info("检测到股票代码: {}, 使用Tushare API获取数据, interval={}", symbol, interval);
                 
                 // 将时间字符串转换为时间戳（毫秒）
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");

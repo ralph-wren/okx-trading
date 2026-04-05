@@ -148,6 +148,48 @@ public class TushareApiServiceImpl implements TushareApiService {
         }
     }
 
+    /**
+     * 获取周线数据
+     */
+    public List<Candlestick> getWeeklyKlineData(String tsCode, String startDate, String endDate, Integer limit) {
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("ts_code", tsCode);
+            if (startDate != null) params.put("start_date", startDate);
+            if (endDate != null) params.put("end_date", endDate);
+            if (limit != null) params.put("limit", limit);
+
+            String fields = "ts_code,trade_date,open,high,low,close,vol,amount";
+            JsonNode dataNode = sendRequest("weekly", params, fields);
+
+            return parseCandlestickData(dataNode, tsCode, "1W");
+        } catch (Exception e) {
+            log.error("获取周线数据失败: tsCode={}, error={}", tsCode, e.getMessage(), e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 获取月线数据
+     */
+    public List<Candlestick> getMonthlyKlineData(String tsCode, String startDate, String endDate, Integer limit) {
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("ts_code", tsCode);
+            if (startDate != null) params.put("start_date", startDate);
+            if (endDate != null) params.put("end_date", endDate);
+            if (limit != null) params.put("limit", limit);
+
+            String fields = "ts_code,trade_date,open,high,low,close,vol,amount";
+            JsonNode dataNode = sendRequest("monthly", params, fields);
+
+            return parseCandlestickData(dataNode, tsCode, "1M");
+        } catch (Exception e) {
+            log.error("获取月线数据失败: tsCode={}, error={}", tsCode, e.getMessage(), e);
+            return Collections.emptyList();
+        }
+    }
+
     @Override
     public Ticker getTicker(String tsCode) {
         try {
@@ -295,6 +337,9 @@ public class TushareApiServiceImpl implements TushareApiService {
     @Override
     public List<Candlestick> getHistoryKlineData(String symbol, String interval, Long startTime, Long endTime, Integer limit) {
         try {
+            log.info("获取历史K线数据: symbol={}, interval={}, startTime={}, endTime={}, limit={}", 
+                    symbol, interval, startTime, endTime, limit);
+            
             // 转换时间戳为日期字符串
             String startDate = null;
             String endDate = null;
@@ -303,8 +348,10 @@ public class TushareApiServiceImpl implements TushareApiService {
                 LocalDateTime startDateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(startTime), ZoneId.systemDefault());
                 if (isMinuteInterval(interval)) {
                     startDate = startDateTime.format(DATETIME_FORMATTER);
+                    log.info("分钟级别数据，开始时间格式化为: {}", startDate);
                 } else {
                     startDate = startDateTime.format(DATE_FORMATTER);
+                    log.info("日线级别数据，开始时间格式化为: {}", startDate);
                 }
             }
 
@@ -312,16 +359,26 @@ public class TushareApiServiceImpl implements TushareApiService {
                 LocalDateTime endDateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(endTime), ZoneId.systemDefault());
                 if (isMinuteInterval(interval)) {
                     endDate = endDateTime.format(DATETIME_FORMATTER);
+                    log.info("分钟级别数据，结束时间格式化为: {}", endDate);
                 } else {
                     endDate = endDateTime.format(DATE_FORMATTER);
+                    log.info("日线级别数据，结束时间格式化为: {}", endDate);
                 }
             }
 
             // 根据interval类型调用不同的API
             if (isMinuteInterval(interval)) {
                 String freq = convertIntervalToFreq(interval);
+                log.info("调用分钟线API: freq={}", freq);
                 return getMinuteKlineData(symbol, freq, startDate, endDate, limit);
+            } else if ("1W".equalsIgnoreCase(interval)) {
+                log.info("调用周线API");
+                return getWeeklyKlineData(symbol, startDate, endDate, limit);
+            } else if ("1M".equalsIgnoreCase(interval)) {
+                log.info("调用月线API");
+                return getMonthlyKlineData(symbol, startDate, endDate, limit);
             } else {
+                log.info("调用日线API");
                 return getDailyKlineData(symbol, startDate, endDate, limit);
             }
         } catch (Exception e) {
@@ -466,9 +523,12 @@ public class TushareApiServiceImpl implements TushareApiService {
         String lower = interval.toLowerCase();
         // 分钟级别：1m, 5m, 15m, 30m, 1min, 5min等
         // 小时级别：1h, 2h, 4h, 6h, 12h等（Tushare用60min接口处理）
-        return lower.contains("min") || 
+        boolean isMinute = lower.contains("min") || 
                lower.matches(".*\\d+m$") || 
                lower.matches(".*\\d+h$");
+        
+        log.debug("判断interval是否为分钟级别: interval={}, isMinute={}", interval, isMinute);
+        return isMinute;
     }
 
     /**

@@ -43,6 +43,15 @@ public class TelegramScraperService {
     @Value("${telegram.scraper.channels:jinse2017}")
     private List<String> defaultChannels;
 
+    @Value("${telegram.scraper.enabled:true}")
+    private boolean scraperEnabled;
+
+    @Value("${telegram.scraper.retry.max:3}")
+    private int maxRetries;
+
+    @Value("${telegram.scraper.retry.delay:2000}")
+    private int retryDelay;
+
     @Value("${okx.proxy.host:localhost}")
     private String proxyHost;
 
@@ -150,16 +159,29 @@ public class TelegramScraperService {
 
     @Scheduled(fixedRate = 60000) // Run every minute
     public void scrapeChannels() {
+        if (!scraperEnabled) {
+            log.debug("Telegram scraper is disabled");
+            return;
+        }
+        
         List<TelegramChannelEntity> channels = telegramChannelRepository.findAll();
         
         for (TelegramChannelEntity channel : channels) {
-            if (!channel.isActive()) continue;
+            if (!channel.isActive()) {
+                log.debug("Skipping inactive channel: {}", channel.getChannelName());
+                continue;
+            }
 
             String name = channel.getChannelName();
-            if ("OKX公告".equalsIgnoreCase(name) || "OKX Announcements".equalsIgnoreCase(name)) {
-                scrapeOkxAnnouncements();
-            } else {
-                scrapeChannel(name);
+            try {
+                if ("OKX公告".equalsIgnoreCase(name) || "OKX Announcements".equalsIgnoreCase(name)) {
+                    scrapeOkxAnnouncements();
+                } else {
+                    scrapeChannel(name);
+                }
+            } catch (Exception e) {
+                log.error("Unexpected error while scraping channel {}: {}", name, e.getMessage());
+                // 继续处理下一个频道，不中断整个任务
             }
         }
     }
@@ -244,17 +266,76 @@ public class TelegramScraperService {
 
     private void scrapeChannel(String channelName) {
         String url = "https://t.me/s/" + channelName;
-        try {
-            log.debug("Scraping channel: {}", channelName);
-            Connection connect = Jsoup.connect(url)
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-                    .timeout(10000);
+        int retryCount = 0;
+        
+        while (retryCount < maxRetries) {
+            try {
+                log.debug("Scraping channel: {} (attempt {}/{})", channelName, retryCount + 1, maxRetries);
+                Connection connect = Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .timeout(15000)
+                        .maxBodySize(0)
+                        .followRedirects(true)
+                        .ignoreHttpErrors(false);
 
-            if (proxyEnabled) {
-                connect.proxy(proxyHost, proxyPort);
+                if (proxyEnabled) {
+                    connect.proxy(proxyHost, proxyPort);
+                }
+
+                Document doc = connect.get();
+                
+                // 如果成功获取文档，处理消息
+                processChannelMessages(doc, channelName);
+                
+                // 成功后跳出重试循环
+                break;
+                
+            } catch (javax.net.ssl.SSLHandshakeException e) {
+                retryCount++;
+                log.warn("SSL handshake failed for channel {} (attempt {}/{}): {}", 
+                        channelName, retryCount, maxRetries, e.getMessage());
+                
+                if (retryCount >= maxRetries) {
+                    log.error("Failed to connect to Telegram channel {} after {} attempts due to SSL error. Consider disabling this channel or checking network/proxy settings.", 
+                            channelName, maxRetries);
+                    return;
+                }
+                
+                // 等待后重试
+                try {
+                    Thread.sleep(retryDelay * retryCount); // 递增等待时间
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                
+            } catch (java.net.SocketTimeoutException e) {
+                retryCount++;
+                log.warn("Connection timeout for channel {} (attempt {}/{})", 
+                        channelName, retryCount, maxRetries);
+                
+                if (retryCount >= maxRetries) {
+                    log.error("Failed to connect to Telegram channel {} after {} attempts due to timeout", 
+                            channelName, maxRetries);
+                    return;
+                }
+                
+                try {
+                    Thread.sleep(retryDelay * retryCount / 2);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                
+            } catch (IOException e) {
+                log.error("Failed to connect to Telegram channel {}: {}", channelName, e.getMessage());
+                return;
             }
-
-            Document doc = connect.get();
+        }
+    }
+    
+    private void processChannelMessages(Document doc, String channelName) {
+        try {
 
             // Try to extract Channel Title and Subscribers if missing in DB
             try {
@@ -359,9 +440,8 @@ public class TelegramScraperService {
                     log.error("Error parsing message in channel {}", channelName, e);
                 }
             }
-
-        } catch (IOException e) {
-            log.error("Failed to connect to Telegram channel: {}", channelName, e);
+        } catch (Exception e) {
+            log.error("Error processing channel messages for {}", channelName, e);
         }
         
         // Try to update metadata from search if avatar is missing
