@@ -45,16 +45,17 @@ public class KlineKafkaProducerServiceImpl implements KlineKafkaProducerService 
             // 构建消息键：symbol_interval，用于分区
             String key = symbol + "_" + interval;
             
-            // 添加元数据
-            JSONObject message = new JSONObject();
-            message.put("symbol", symbol);
-            message.put("interval", interval);
-            message.put("data", klineData);
-            message.put("timestamp", System.currentTimeMillis());
+            // ✅ 直接发送 OKX 原始数据，不进行包装
+            // klineData 已经是 OKX WebSocket 的原始格式：
+            // {
+            //   "arg": {"channel": "candle4H", "instId": "BTC-USDT"},
+            //   "data": [["1712188800000", ...]]
+            // }
+            // 这样与 data-warehouse 的格式保持一致
 
             // 异步发送到 Kafka
             CompletableFuture<SendResult<String, String>> future = 
-                kafkaTemplate.send(topic, key, message.toJSONString());
+                kafkaTemplate.send(topic, key, klineData.toJSONString());
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {

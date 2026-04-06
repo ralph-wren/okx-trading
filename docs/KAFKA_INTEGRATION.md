@@ -1,130 +1,111 @@
-# Kafka 集成说明文档
-
-## 概述
-
-为了解决 WebSocket 实时行情数据在任务重启后丢失的问题，我们引入了 Kafka 作为可选的数据缓冲层。
+# Kafka 集成说明
 
 ## 架构设计
 
 ### 数据流向
 
-#### 未启用 Kafka（默认）
 ```
-WebSocket → handleKlineMessage → 直接处理 → RealTimeStrategyManager
+OKX WebSocket API
+    ↓
+data-warehouse 项目 (数据采集)
+    ↓
+Kafka Topics
+    ├─ crypto-ticker-spot (现货数据)
+    └─ crypto-ticker-swap (合约数据)
+    ↓
+    ├─→ data-warehouse Flink 作业 (数据仓库 ODS/DWD/DWS/ADS 层)
+    └─→ okx-trading (可选：实时策略消费)
 ```
-
-#### 启用 Kafka
-```
-WebSocket → handleKlineMessage → Kafka Producer → Kafka Topic
-                                                        ↓
-                                    Kafka Consumer → 处理 → RealTimeStrategyManager
-```
-
-### 核心特性
-
-1. **可配置切换**：通过配置文件一键启用/禁用 Kafka
-2. **最小化改造**：原有代码逻辑保持不变，只在 WebSocket 处理层添加分支
-3. **偏移量管理**：使用手动提交模式，确保任务重启后继续消费
-4. **数据不丢失**：Kafka 持久化存储，重启后自动恢复
 
 ## 配置说明
 
-### 1. 添加 Maven 依赖
+### 1. okx-trading 项目配置
 
-在 `pom.xml` 中添加 Kafka 依赖：
-
-```xml
-<!-- Kafka -->
-<dependency>
-    <groupId>org.springframework.kafka</groupId>
-    <artifactId>spring-kafka</artifactId>
-</dependency>
-```
-
-### 2. 配置文件
-
-在 `application.properties` 中添加以下配置：
+#### 默认配置（推荐）
 
 ```properties
-# Kafka Configuration for K-line Data Buffer
-# 是否启用 Kafka 缓冲（false=直接处理，true=通过Kafka缓冲）
+# 不启用 Kafka 生产者（数据由 data-warehouse 统一采集）
 kline.kafka.enabled=false
+```
 
-# Kafka 服务器地址
-spring.kafka.bootstrap-servers=localhost:9092
+**说明**：
+- okx-trading 专注于实时交易策略执行
+- 不再重复消费 WebSocket 并写入 Kafka
+- 避免与 data-warehouse 的数据采集功能重复
 
-# Kafka 生产者配置
-spring.kafka.producer.key-serializer=org.apache.kafka.common.serialization.StringSerializer
-spring.kafka.producer.value-serializer=org.apache.kafka.common.serialization.StringSerializer
-spring.kafka.producer.acks=1
-spring.kafka.producer.retries=3
+#### 可选配置：从 Kafka 消费数据
 
-# Kafka 消费者配置
-spring.kafka.consumer.group-id=okx-trading-kline-consumer
-spring.kafka.consumer.key-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-spring.kafka.consumer.value-deserializer=org.apache.kafka.common.serialization.StringDeserializer
-spring.kafka.consumer.auto-offset-reset=earliest
+如果 okx-trading 需要从 Kafka 消费历史数据或实时数据流，可以添加 Kafka Consumer：
+
+```properties
+# Kafka Consumer 配置（可选）
+spring.kafka.consumer.bootstrap-servers=localhost:9093
+spring.kafka.consumer.group-id=okx-trading-consumer
+spring.kafka.consumer.auto-offset-reset=latest
 spring.kafka.consumer.enable-auto-commit=false
 
-# K线数据 Topic 名称
-kline.kafka.topic=okx-kline-data
+# 订阅的 Topics
+kafka.consumer.topics=crypto-ticker-spot,crypto-ticker-swap
 ```
 
-### 3. 环境变量（可选）
+### 2. data-warehouse 项目配置
 
-也可以通过环境变量配置：
+data-warehouse 项目已完成 WebSocket → Kafka 的数据采集功能：
 
-```bash
-export KLINE_KAFKA_ENABLED=true
-export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+#### 配置文件位置
+- `data-warehouse/src/main/resources/config/application-dev.yml`
+- `data-warehouse/src/main/resources/config/application-docker.yml`
+- `data-warehouse/src/main/resources/config/application-prod.yml`
+
+#### 核心配置
+
+```yaml
+# OKX WebSocket 配置
+okx:
+  websocket:
+    url: wss://ws.okx.com:8443/ws/v5/public
+  symbols:
+    spot: BTC-USDT,ETH-USDT,SOL-USDT,BNB-USDT,XRP-USDT
+    swap: BTC-USDT-SWAP,ETH-USDT-SWAP,SOL-USDT-SWAP,BNB-USDT-SWAP
+
+# Kafka 配置
+kafka:
+  bootstrap-servers: localhost:9093
+  topic:
+    crypto-ticker-spot: crypto-ticker-spot  # 现货 Topic
+    crypto-ticker-swap: crypto-ticker-swap  # 合约 Topic
+  producer:
+    acks: 1
+    retries: 3
+    compression-type: lz4
 ```
-
-## 使用方式
-
-### 启用 Kafka 模式
-
-1. 确保 Kafka 服务已启动
-2. 修改配置文件：`kline.kafka.enabled=true`
-3. 重启应用
-
-### 禁用 Kafka 模式（默认）
-
-1. 修改配置文件：`kline.kafka.enabled=false`
-2. 重启应用
 
 ## 核心组件
 
-### 1. KlineKafkaProducerService
+### data-warehouse 项目
 
-**接口**：定义 Kafka 生产者服务
-- `sendKlineData()`: 发送 K线数据到 Kafka
-- `isEnabled()`: 检查是否启用
+#### 1. OKXWebSocketClient
+- 位置：`data-warehouse/src/main/java/com/crypto/dw/collector/OKXWebSocketClient.java`
+- 功能：
+  - 连接 OKX WebSocket API
+  - 同时订阅现货和合约数据
+  - 自动重连机制
+  - 数据分流到不同 Kafka Topics
 
-**实现**：
-- `KlineKafkaProducerServiceImpl`: Kafka 启用时的实现
-- `KlineKafkaProducerNoOpServiceImpl`: Kafka 禁用时的空实现
+#### 2. KafkaProducerManager
+- 位置：`data-warehouse/src/main/java/com/crypto/dw/kafka/KafkaProducerManager.java`
+- 功能：
+  - 管理 Kafka Producer 连接
+  - 支持指定 Topic 发送消息
+  - 异步发送，性能优化
+  - 统计成功/失败次数
 
-### 2. KlineKafkaConsumerService
-
-**功能**：从 Kafka 消费 K线数据并处理
-- 使用 `@KafkaListener` 监听 Topic
-- 手动提交偏移量（`AckMode.MANUAL`）
-- 解析数据并通知 `RealTimeStrategyManager`
-
-### 3. KafkaConfig
-
-**功能**：Kafka 配置类
-- 生产者工厂配置
-- 消费者工厂配置
-- 监听器容器工厂配置
-- 只在 `kline.kafka.enabled=true` 时加载
-
-### 4. OkxApiWebSocketServiceImpl
-
-**修改点**：`handleKlineMessage()` 方法
-- 检查 `klineKafkaProducerService.isEnabled()`
-- 启用：发送到 Kafka
-- 禁用：直接处理（原有逻辑）
+#### 3. DataCollectorMain
+- 位置：`data-warehouse/src/main/java/com/crypto/dw/collector/DataCollectorMain.java`
+- 功能：
+  - 启动数据采集服务
+  - 初始化 WebSocket 和 Kafka 连接
+  - 优雅关闭处理
 
 ## 数据格式
 
@@ -132,213 +113,154 @@ export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 
 ```json
 {
-  "symbol": "BTC-USDT",
-  "interval": "1m",
-  "timestamp": 1712345678900,
-  "data": {
-    "ts": 1712345678000,
-    "o": "50000.00",
-    "h": "50100.00",
-    "l": "49900.00",
-    "c": "50050.00",
-    "vol": "123.45"
-  }
+  "instId": "BTC-USDT",
+  "last": "50000.5",
+  "lastSz": "0.1",
+  "askPx": "50001.0",
+  "askSz": "1.5",
+  "bidPx": "49999.5",
+  "bidSz": "2.0",
+  "open24h": "49500.0",
+  "high24h": "50500.0",
+  "low24h": "49000.0",
+  "volCcy24h": "1000000.0",
+  "vol24h": "20.5",
+  "ts": "1711234567890"
 }
 ```
 
-### Kafka Topic 分区策略
+### Topic 分配规则
 
-- **Key**: `{symbol}_{interval}` (例如: `BTC-USDT_1m`)
-- **分区**: 根据 Key 的 hash 值自动分配
-- **好处**: 同一交易对的数据在同一分区，保证顺序
+- **现货数据**：`instId` 不包含 `-SWAP` 后缀 → `crypto-ticker-spot`
+- **合约数据**：`instId` 包含 `-SWAP` 后缀 → `crypto-ticker-swap`
 
-## 偏移量管理
+## 启动顺序
 
-### 手动提交模式
+### 1. 启动 Kafka
 
-```java
-@KafkaListener(...)
-public void consumeKlineData(..., Acknowledgment acknowledgment) {
-    try {
-        // 处理数据
-        processData();
-        
-        // 手动提交偏移量
-        acknowledgment.acknowledge();
-    } catch (Exception e) {
-        // 不提交偏移量，下次重启会重新消费
-        log.error("处理失败，不提交偏移量");
-    }
-}
+```bash
+# 进入 data-warehouse 目录
+cd data-warehouse
+
+# 启动 Kafka
+./manage-kafka.sh start
 ```
 
-### 重启恢复机制
+### 2. 启动 data-warehouse 数据采集
 
-1. **首次启动**: `auto-offset-reset=earliest`，从最早的消息开始消费
-2. **正常重启**: 从上次提交的偏移量继续消费
-3. **异常重启**: 未提交的消息会重新消费（至少一次语义）
+```bash
+# 方式 1：使用脚本
+./run-collector.sh
+
+# 方式 2：使用 Maven
+mvn exec:java -Dexec.mainClass="com.crypto.dw.collector.DataCollectorMain" -Dexec.args="--APP_ENV dev"
+```
+
+### 3. 启动 okx-trading（可选）
+
+```bash
+# 进入 okx-trading 目录
+cd okx-trading
+
+# 启动应用
+mvn spring-boot:run
+```
+
+## 监控和验证
+
+### 1. 查看 Kafka Topics
+
+```bash
+# 列出所有 Topics
+docker exec -it kafka-okx-trading kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+# 查看 Topic 详情
+docker exec -it kafka-okx-trading kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic crypto-ticker-spot
+```
+
+### 2. 消费 Kafka 消息（测试）
+
+```bash
+# 消费现货数据
+docker exec -it kafka-okx-trading kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic crypto-ticker-spot \
+  --from-beginning
+
+# 消费合约数据
+docker exec -it kafka-okx-trading kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic crypto-ticker-swap \
+  --from-beginning
+```
+
+### 3. 查看 Kafka UI
+
+访问：http://localhost:8090
+
+- 查看 Topics 列表
+- 查看消息数量
+- 查看 Consumer Groups
+
+## 故障排查
+
+### 问题 1：Kafka 连接失败
+
+**症状**：`Connection refused` 或 `Timeout`
+
+**解决方案**：
+1. 检查 Kafka 是否启动：`docker ps | grep kafka`
+2. 检查端口是否正确：`9092`（容器内）或 `9093`（宿主机）
+3. 检查防火墙设置
+
+### 问题 2：WebSocket 连接失败
+
+**症状**：`WebSocket connection failed`
+
+**解决方案**：
+1. 检查网络连接
+2. 检查代理设置（如果使用代理）
+3. 查看日志：`tail -f logs/collector.log`
+
+### 问题 3：数据未写入 Kafka
+
+**症状**：Kafka Topic 中没有数据
+
+**解决方案**：
+1. 检查 WebSocket 是否连接成功
+2. 检查订阅的交易对是否正确
+3. 查看 Kafka Producer 日志
+4. 验证 Topic 是否存在
 
 ## 性能优化
 
-### 生产者优化
+### 1. Kafka Producer 配置
 
-```properties
-# 批量发送延迟（毫秒）
-spring.kafka.producer.linger-ms=10
-
-# 批量大小（字节）
-spring.kafka.producer.batch-size=16384
+```yaml
+kafka:
+  producer:
+    acks: 1  # 平衡性能和可靠性
+    retries: 3  # 重试次数
+    batch-size: 16384  # 批量大小
+    linger-ms: 10  # 批量延迟
+    compression-type: lz4  # 压缩算法
 ```
 
-### 消费者优化
+### 2. WebSocket 配置
 
-```properties
-# 每次拉取最多记录数
-spring.kafka.consumer.max-poll-records=100
-
-# 并发消费者数量（在 KafkaConfig 中配置）
-concurrency=3
+```yaml
+okx:
+  websocket:
+    reconnect:
+      max-retries: 10  # 最大重连次数
+      initial-delay: 1000  # 初始延迟
+      max-delay: 60000  # 最大延迟
 ```
-
-## 监控和日志
-
-### 日志级别
-
-```properties
-logging.level.org.apache.kafka=INFO
-logging.level.org.springframework.kafka=INFO
-logging.level.com.okx.trading.service.KlineKafkaProducerService=DEBUG
-logging.level.com.okx.trading.service.KlineKafkaConsumerService=DEBUG
-```
-
-### 关键日志
-
-- `✅ K线数据已发送到 Kafka`: 生产成功
-- `📥 接收到 Kafka 消息`: 消费开始
-- `✅ 从 Kafka 处理 K线数据`: 处理成功
-- `✅ 偏移量已提交`: 偏移量提交成功
-- `❌ 处理 Kafka K线数据失败`: 处理失败（不提交偏移量）
-
-## 故障处理
-
-### 1. Kafka 服务不可用
-
-**现象**: 应用启动失败或生产者发送失败
-
-**解决方案**:
-- 检查 Kafka 服务是否启动
-- 检查 `bootstrap-servers` 配置是否正确
-- 临时禁用 Kafka: `kline.kafka.enabled=false`
-
-### 2. 消费者处理失败
-
-**现象**: 日志显示处理失败，偏移量未提交
-
-**解决方案**:
-- 检查错误日志，修复数据处理逻辑
-- 重启应用，自动从上次成功的偏移量继续消费
-
-### 3. 消息积压
-
-**现象**: Kafka 中消息堆积，消费速度慢
-
-**解决方案**:
-- 增加消费者并发数: `concurrency=5`
-- 增加分区数（需要重建 Topic）
-- 优化数据处理逻辑
-
-## 测试建议
-
-### 1. 功能测试
-
-```bash
-# 1. 启动 Kafka
-docker run -d --name kafka -p 9092:9092 apache/kafka:latest
-
-# 2. 创建 Topic
-kafka-topics.sh --create --topic okx-kline-data --bootstrap-server localhost:9092 --partitions 3 --replication-factor 1
-
-# 3. 启用 Kafka 模式
-kline.kafka.enabled=true
-
-# 4. 启动应用，观察日志
-```
-
-### 2. 重启测试
-
-```bash
-# 1. 启动应用，订阅 K线数据
-# 2. 观察 Kafka 中的消息
-kafka-console-consumer.sh --topic okx-kline-data --bootstrap-server localhost:9092
-
-# 3. 停止应用
-# 4. 重启应用
-# 5. 确认从上次偏移量继续消费
-```
-
-### 3. 性能测试
-
-```bash
-# 监控 Kafka 消费者组状态
-kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group okx-trading-kline-consumer --describe
-```
-
-## 最佳实践
-
-1. **生产环境建议启用 Kafka**：确保数据不丢失
-2. **开发环境可禁用 Kafka**：简化部署，快速调试
-3. **定期监控消费者 Lag**：避免消息积压
-4. **合理设置分区数**：根据交易对数量和消费能力调整
-5. **配置 Kafka 数据保留策略**：避免磁盘占满
-
-## 迁移步骤
-
-### 从直接处理迁移到 Kafka 模式
-
-1. 添加 Maven 依赖
-2. 添加配置文件
-3. 启动 Kafka 服务
-4. 创建 Topic
-5. 修改配置 `kline.kafka.enabled=true`
-6. 重启应用
-7. 验证数据流向
-
-### 从 Kafka 模式回退到直接处理
-
-1. 修改配置 `kline.kafka.enabled=false`
-2. 重启应用
-3. （可选）停止 Kafka 服务
-
-## 常见问题
-
-### Q1: 为什么选择手动提交偏移量？
-
-A: 手动提交可以确保只有成功处理的消息才提交偏移量，避免数据丢失。
-
-### Q2: 重启后会重复消费吗？
-
-A: 可能会重复消费少量未提交的消息（至少一次语义），业务逻辑需要支持幂等性。
-
-### Q3: Kafka 模式会影响性能吗？
-
-A: 会有轻微延迟（通常 < 100ms），但换来了数据可靠性和重启恢复能力。
-
-### Q4: 可以动态切换模式吗？
-
-A: 需要重启应用才能生效，不支持运行时动态切换。
 
 ## 总结
 
-通过引入 Kafka 作为可选的数据缓冲层，我们实现了：
+- **data-warehouse**：统一的数据采集入口，WebSocket → Kafka
+- **okx-trading**：专注实时交易策略，不再重复采集数据
+- **架构优势**：职责清晰、避免重复、易于维护
 
-✅ 数据不丢失：Kafka 持久化存储  
-✅ 重启恢复：偏移量管理，自动继续消费  
-✅ 最小改造：原有代码逻辑保持不变  
-✅ 灵活配置：一键启用/禁用  
-✅ 生产就绪：手动提交、批量处理、并发消费
-
----
-
-文档版本：1.0  
-创建时间：2026-04-05  
-作者：Kiro AI Assistant
+如需从 Kafka 消费数据，okx-trading 可以添加 Kafka Consumer 功能（可选）。

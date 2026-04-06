@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Scope;
 import org.springframework.context.annotation.ScopedProxyMode;
+import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -68,6 +69,7 @@ public class RealTimeStrategyManager implements ApplicationRunner {
     private final NotificationService notificationService;
     private ExecutorService executorService;
     private RedisTemplate redisTemplate;
+    private final Environment environment;
 
 
     public RealTimeStrategyManager(@Lazy OkxApiWebSocketServiceImpl webSocketService,
@@ -80,7 +82,8 @@ public class RealTimeStrategyManager implements ApplicationRunner {
                                    RealTimeStrategyRepository realTimeStrategyRepository,
                                    NotificationService notificationService,
                                    @Qualifier("executeTradeScheduler") ExecutorService executorService,
-                                   RedisTemplate redisTemplate) {
+                                   RedisTemplate redisTemplate,
+                                   Environment environment) {
         this.webSocketService = webSocketService;
         this.realTimeOrderService = realTimeOrderService;
         this.tradeController = tradeController;
@@ -93,6 +96,7 @@ public class RealTimeStrategyManager implements ApplicationRunner {
         this.notificationService = notificationService;
         this.executorService = executorService;
         this.redisTemplate = redisTemplate;
+        this.environment = environment;
     }
 
     // 存储正在运行的策略信息
@@ -472,14 +476,27 @@ public class RealTimeStrategyManager implements ApplicationRunner {
             response.put("status", CANCELED);
         }
 
-        // 订阅K线数据，已订阅过会跳过
-        try {
-            webSocketService.subscribeKlineData(strategyEntity.getSymbol(), strategyEntity.getInterval());
-        } catch (Exception e) {
-            log.error("订阅K线数据失败: {}", e.getMessage(), e);
-            response.put("message", "订阅K线数据失败");
-            response.put("status", CANCELED);
-            return response;
+        // 订阅K线数据
+        // 如果启用了 Kafka（kline.kafka.enabled=true），则订阅 WebSocket 并写入 Kafka
+        // 如果未启用 Kafka（kline.kafka.enabled=false），则不订阅 WebSocket，直接从 Kafka 消费（由 data-warehouse 提供）
+        boolean kafkaEnabled = environment.getProperty("kline.kafka.enabled", Boolean.class, false);
+        
+        if (kafkaEnabled) {
+            // 启用了 Kafka，需要订阅 WebSocket 并写入 Kafka
+            try {
+                webSocketService.subscribeKlineData(strategyEntity.getSymbol(), strategyEntity.getInterval());
+                log.info("✓ 已订阅 WebSocket K线数据: symbol={}, interval={}", 
+                        strategyEntity.getSymbol(), strategyEntity.getInterval());
+            } catch (Exception e) {
+                log.error("订阅K线数据失败: {}", e.getMessage(), e);
+                response.put("message", "订阅K线数据失败");
+                response.put("status", CANCELED);
+                return response;
+            }
+        } else {
+            // 未启用 Kafka，不订阅 WebSocket，数据由 data-warehouse 通过 Kafka 提供
+            log.info("✓ Kafka 未启用，跳过 WebSocket 订阅，将从 Kafka 消费数据: symbol={}, interval={}", 
+                    strategyEntity.getSymbol(), strategyEntity.getInterval());
         }
 
         // 根据strategyEntity创建具体的Strategy实例
