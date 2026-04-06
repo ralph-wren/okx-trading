@@ -269,17 +269,26 @@ public class Ta4jBacktestController {
         List<Map<String, Object>> allResults = Collections.synchronizedList(new ArrayList<>());
 
         try {
-            // 获取历史数据
-            List<CandlestickEntity> candlesticks = historicalDataService.fetchAndSaveHistoryWithIntegrityCheck(symbol, interval, startTime.format(dateFormat), endTime.format(dateFormat));
+            // ========== 性能优化: 数据只加载一次，所有策略共享 ==========
+            long dataLoadStart = System.currentTimeMillis();
+            
+            // 获取历史数据（只加载一次）
+            List<CandlestickEntity> candlesticks = historicalDataService.fetchAndSaveHistoryWithIntegrityCheck(
+                symbol, interval, startTime.format(dateFormat), endTime.format(dateFormat));
 
-            // 获取基准数据
-            List<CandlestickEntity> benchmarkCandlesticks = historicalDataService.fetchAndSaveHistoryWithIntegrityCheck("BTC-USDT", interval, startTime.format(dateFormat), endTime.format(dateFormat));
+            // 获取基准数据（只加载一次）
+            List<CandlestickEntity> benchmarkCandlesticks = historicalDataService.fetchAndSaveHistoryWithIntegrityCheck(
+                "BTC-USDT", interval, startTime.format(dateFormat), endTime.format(dateFormat));
 
             // 生成唯一的系列名称
-            String seriesName = CandlestickAdapter.getSymbol(candlesticks.get(0)) + "_" + CandlestickAdapter.getIntervalVal(candlesticks.get(0));
+            String seriesName = CandlestickAdapter.getSymbol(candlesticks.get(0)) + "_" + 
+                               CandlestickAdapter.getIntervalVal(candlesticks.get(0));
 
-            // 使用转换器将蜡烛图实体转换为条形系列
+            // 使用转换器将蜡烛图实体转换为条形系列（只转换一次）
             BarSeries series = barSeriesConverter.convert(candlesticks, seriesName);
+            
+            long dataLoadEnd = System.currentTimeMillis();
+            log.info("数据加载完成，耗时: {}ms, K线数量: {}", (dataLoadEnd - dataLoadStart), candlesticks.size());
 
             // 获取所有支持的策略
             Map<String, Map<String, Object>> strategiesInfo = strategyInfoService.getStrategiesInfo();
@@ -287,27 +296,26 @@ public class Ta4jBacktestController {
 
             log.info("找到{}个策略，准备执行批量回测", strategyCodes.size());
 
-            // 创建线程池
+            // ========== 性能优化: 使用CompletableFuture并行执行，但共享数据 ==========
+            long backtestStart = System.currentTimeMillis();
+            
+            // 创建所有回测任务
             List<CompletableFuture<Void>> futures = new ArrayList<>();
-
-            // 创建回测任务
+            
             for (String strategyCode : strategyCodes) {
                 Map<String, Object> strategyDetails = strategiesInfo.get(strategyCode);
                 String defaultParams = (String) strategyDetails.get("default_params");
-
-                // 创建异步任务
+                
                 CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                    String currentStrategyCode = strategyCode;
                     try {
-                        log.info("开始回测策略: {}({})", strategyDetails.getOrDefault("name", "-"), currentStrategyCode);
+                        log.debug("开始回测策略: {}({})", strategyDetails.getOrDefault("name", "-"), strategyCode);
 
-                        // 执行回测 - 添加额外的异常处理
+                        // 执行回测 - 共享series和benchmarkCandlesticks
                         BacktestResultDTO result = null;
                         try {
-                            result = ta4jBacktestService.backtest(series, benchmarkCandlesticks, currentStrategyCode, initialAmount, feeRatio, interval);
+                            result = ta4jBacktestService.backtest(series, benchmarkCandlesticks, strategyCode, initialAmount, feeRatio, interval);
                         } catch (Exception backtestException) {
-                            log.error("策略 {} 回测执行失败: {}", currentStrategyCode, backtestException.getMessage());
-                            // 创建一个失败的结果对象
+                            log.error("策略 {} 回测执行失败: {}", strategyCode, backtestException.getMessage());
                             result = new BacktestResultDTO();
                             result.setSuccess(false);
                             result.setErrorMessage("回测执行失败: " + backtestException.getMessage());
@@ -325,31 +333,27 @@ public class Ta4jBacktestController {
                         // 如果需要保存结果到数据库
                         if (saveResult && result.isSuccess()) {
                             try {
-                                // 保存交易明细
                                 String backtestId = backtestTradeService.saveBacktestTrades(symbol, result, defaultParams);
                                 result.setBacktestId(backtestId);
 
-                                // 保存资金曲线数据
                                 if (result.getEquityCurve() != null && !result.getEquityCurve().isEmpty() &&
                                         result.getEquityCurveTimestamps() != null && !result.getEquityCurveTimestamps().isEmpty()) {
                                     backtestTradeService.saveBacktestEquityCurve(backtestId, result.getEquityCurve(), result.getEquityCurveTimestamps());
-                                    log.info("成功保存回测资金曲线数据，回测ID: {}, 数据点数: {}", backtestId, result.getEquityCurve().size());
+                                    log.debug("成功保存回测资金曲线数据，回测ID: {}, 数据点数: {}", backtestId, result.getEquityCurve().size());
                                 }
 
-                                // 保存汇总信息，包含批量回测ID
                                 backtestTradeService.saveBacktestSummary(
                                         result, defaultParams, symbol, interval, startTime, endTime, backtestId, batchBacktestId);
 
                                 result.setParameterDescription(result.getParameterDescription() + " (BacktestID: " + backtestId + ", BatchID: " + batchBacktestId + ")");
                             } catch (Exception saveException) {
-                                log.error("策略 {} 保存结果失败: {}", currentStrategyCode, saveException.getMessage());
-                                // 不影响回测结果，只是保存失败
+                                log.error("策略 {} 保存结果失败: {}", strategyCode, saveException.getMessage());
                             }
                         }
 
                         // 记录结果
                         Map<String, Object> resultMap = new HashMap<>();
-                        resultMap.put("strategy_code", currentStrategyCode);
+                        resultMap.put("strategy_code", strategyCode);
                         resultMap.put("strategy_name", strategyDetails.get("name"));
                         resultMap.put("success", result.isSuccess());
 
@@ -362,56 +366,48 @@ public class Ta4jBacktestController {
                             resultMap.put("max_drawdown", result.getMaxDrawdown() != null ? result.getMaxDrawdown() : BigDecimal.ZERO);
                             resultMap.put("backtest_id", result.getBacktestId());
 
-                            log.info("策略 {} 回测成功 - 收益率: {}%, 交易次数: {}, 胜率: {}%",
+                            log.debug("策略 {} 回测成功 - 收益率: {}%, 交易次数: {}, 胜率: {}%",
                                     strategyDetails.get("name"),
                                     result.getTotalReturn() != null ? result.getTotalReturn().multiply(new BigDecimal("100")).toString() : "0",
                                     String.valueOf(result.getNumberOfTrades()),
                                     result.getWinRate() != null ? result.getWinRate().multiply(new BigDecimal("100")).toString() : "0");
                         } else {
                             resultMap.put("error", result.getErrorMessage() != null ? result.getErrorMessage() : "未知错误");
-                            log.warn("策略 {} 回测失败 - 错误信息: {}", currentStrategyCode, result.getErrorMessage());
+                            log.warn("策略 {} 回测失败 - 错误信息: {}", strategyCode, result.getErrorMessage());
                         }
 
                         allResults.add(resultMap);
 
                     } catch (Exception e) {
-                        log.error("策略 {} 回测过程中发生未捕获错误: {}", currentStrategyCode, e.getMessage(), e);
+                        log.error("策略 {} 回测过程中发生未捕获错误: {}", strategyCode, e.getMessage(), e);
                         Map<String, Object> errorResult = new HashMap<>();
-                        errorResult.put("strategy_code", currentStrategyCode);
+                        errorResult.put("strategy_code", strategyCode);
                         errorResult.put("strategy_name", strategyDetails.get("name"));
                         errorResult.put("success", false);
                         errorResult.put("error", "未捕获错误: " + e.getMessage());
                         allResults.add(errorResult);
                     }
                 }, scheduler);
-
+                
                 futures.add(future);
             }
 
-            // 等待所有任务完成，设置单策略5秒超时时间
-            for (int i = 0; i < futures.size(); i++) {
-                CompletableFuture<Void> future = futures.get(i);
-                String strategyCode = strategyCodes.get(i);
+            // 等待所有任务完成
+            log.info("等待所有{}个策略回测任务完成...", futures.size());
+            for (CompletableFuture<Void> future : futures) {
                 try {
-                    future.get(60, TimeUnit.SECONDS); // 单策略5秒超时
+                    future.get(120, TimeUnit.SECONDS);  // 每个策略最多等待120秒
                 } catch (TimeoutException e) {
-                    log.warn("策略 {} 回测超时（60秒），取消该策略的回测任务", strategiesInfo.get(strategyCode).get("strategyName"));
-                    future.cancel(true);
-
-                    // 添加超时错误结果
-                    Map<String, Object> timeoutResult = new HashMap<>();
-                    timeoutResult.put("strategy_code", strategyCode);
-                    timeoutResult.put("strategy_name", "超时策略: " + strategiesInfo.get(strategyCode).get("strategyName"));
-                    timeoutResult.put("success", false);
-                    timeoutResult.put("error", "策略回测超时（60秒）");
-                    allResults.add(timeoutResult);
-                } catch (ExecutionException e) {
-                    log.error("策略 {} 执行异常: {}", strategyCode, e.getMessage(), e);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    log.error("策略 {} 执行被中断: {}", strategyCode, e.getMessage(), e);
+                    log.error("策略回测超时");
+                } catch (Exception e) {
+                    log.error("等待策略回测完成时发生错误: {}", e.getMessage());
                 }
             }
+            
+            long backtestEnd = System.currentTimeMillis();
+            log.info("所有策略回测完成，耗时: {}ms, 平均每策略: {}ms", 
+                    (backtestEnd - backtestStart),
+                    strategyCodes.isEmpty() ? 0 : (backtestEnd - backtestStart) / strategyCodes.size());
 
             // 按收益率排序结果
             allResults.sort((a, b) -> {
