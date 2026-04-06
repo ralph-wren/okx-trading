@@ -34,10 +34,12 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Kafka 监控服务实现
  * 监控数据新增和消费者 lag
+ * 
+ * 始终启用,监控 Kafka Consumer 的运行状态
  */
 @Slf4j
 @Service
-@ConditionalOnProperty(name = "kline.kafka.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "kafka.monitor.enabled", havingValue = "true", matchIfMissing = true)
 public class KafkaMonitorServiceImpl implements KafkaMonitorService {
 
     @Autowired
