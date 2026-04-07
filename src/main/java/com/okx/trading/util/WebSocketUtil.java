@@ -87,6 +87,9 @@ public class WebSocketUtil {
     // 添加重连状态管理
     private final Set<String> reconnectingChannels = ConcurrentHashMap.newKeySet();
 
+    // 应用关闭标志 - 用于防止在关闭过程中提交任务到已终止的线程池
+    private final AtomicBoolean isShuttingDown = new AtomicBoolean(false);
+
     @Autowired
     public WebSocketUtil(OkxApiConfig okxApiConfig, @Qualifier("webSocketHttpClient") OkHttpClient okHttpClient, ApplicationEventPublisher applicationEventPublisher,
                          @Qualifier("websocketPingScheduler") ScheduledExecutorService pingScheduler,
@@ -169,31 +172,72 @@ public class WebSocketUtil {
      */
     @PreDestroy
     public void cleanup() {
+        // 1. 首先设置关闭标志,防止新的任务提交
+        isShuttingDown.set(true);
+        logger.info("应用正在关闭,设置关闭标志");
+
+        // 2. 关闭所有WebSocket连接,防止回调继续提交任务
+        try {
+            if (publicWebSocket != null) {
+                publicWebSocket.close(1000, "Application shutting down");
+                logger.info("已关闭公共频道WebSocket连接");
+            }
+        } catch (Exception e) {
+            logger.warn("关闭公共频道WebSocket失败: {}", e.getMessage());
+        }
+
+        try {
+            if (bussinessWebSocket != null) {
+                bussinessWebSocket.close(1000, "Application shutting down");
+                logger.info("已关闭业务频道WebSocket连接");
+            }
+        } catch (Exception e) {
+            logger.warn("关闭业务频道WebSocket失败: {}", e.getMessage());
+        }
+
+        try {
+            if (privateWebSocket != null) {
+                privateWebSocket.close(1000, "Application shutting down");
+                logger.info("已关闭私有频道WebSocket连接");
+            }
+        } catch (Exception e) {
+            logger.warn("关闭私有频道WebSocket失败: {}", e.getMessage());
+        }
+
+        // 3. 等待一小段时间,让WebSocket回调完成
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // 4. 关闭线程池
+        logger.info("开始关闭线程池");
         pingScheduler.shutdown();
         reconnectScheduler.shutdown();
+        websocketConnectScheduler.shutdown();
+
         try {
             if (!pingScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 pingScheduler.shutdownNow();
+                logger.warn("Ping调度器强制关闭");
             }
             if (!reconnectScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 reconnectScheduler.shutdownNow();
+                logger.warn("重连调度器强制关闭");
+            }
+            if (!websocketConnectScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                websocketConnectScheduler.shutdownNow();
+                logger.warn("WebSocket连接调度器强制关闭");
             }
         } catch (InterruptedException e) {
             pingScheduler.shutdownNow();
             reconnectScheduler.shutdownNow();
+            websocketConnectScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
         }
 
-        if (publicWebSocket != null) {
-            publicWebSocket.close(1000, "Application shutting down");
-        }
-
-        if (bussinessWebSocket != null) {
-            bussinessWebSocket.close(1000, "Application shutting down");
-        }
-
-        if (privateWebSocket != null) {
-            privateWebSocket.close(1000, "Application shutting down");
-        }
+        logger.info("WebSocket资源清理完成");
     }
 
     /**
@@ -403,6 +447,18 @@ public class WebSocketUtil {
      * 安排私有频道重连 - 优化版本
      */
     private void schedulePrivateReconnect() {
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过私有频道重连");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (reconnectScheduler.isShutdown() || reconnectScheduler.isTerminated()) {
+            logger.warn("重连调度器已关闭,无法安排私有频道重连");
+            return;
+        }
+
         if (isCurrentlyReconnecting("private")) {
             debugLog("私有频道已在重连中，跳过本次重连请求");
             return;
@@ -410,7 +466,8 @@ public class WebSocketUtil {
 
         markReconnectStart("private");
 
-        reconnectScheduler.submit(() -> {
+        try {
+            reconnectScheduler.submit(() -> {
             try {
                 int currentRetry = privateRetryCount.getAndIncrement();
 
@@ -465,6 +522,13 @@ public class WebSocketUtil {
                 markReconnectEnd("private");
             }
         });
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交私有频道重连任务,线程池可能已关闭: {}", e.getMessage());
+            markReconnectEnd("private");
+        } catch (Exception e) {
+            logger.error("安排私有频道重连失败", e);
+            markReconnectEnd("private");
+        }
     }
 
     /**
@@ -962,8 +1026,21 @@ public class WebSocketUtil {
      * 恢复公共频道的操作
      */
     private void restorePublicOperations() {
-        CompletableFuture.runAsync(() -> {
-            logger.info("开始恢复公共频道订阅，共 {} 个待执行操作", publicPendingOperations.size());
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过恢复公共频道操作");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (websocketConnectScheduler.isShutdown() || websocketConnectScheduler.isTerminated()) {
+            logger.warn("WebSocket连接调度器已关闭,无法恢复公共频道操作");
+            return;
+        }
+
+        try {
+            CompletableFuture.runAsync(() -> {
+                logger.info("开始恢复公共频道订阅，共 {} 个待执行操作", publicPendingOperations.size());
 
             // 如果两个连接都已经就绪，才开始恢复操作
             if (!publicConnected.get() || !bussinessConnected.get()) {
@@ -1037,14 +1114,32 @@ public class WebSocketUtil {
             } catch (Exception e) {
                 logger.error("发布WebSocket重连事件失败", e);
             }
-        }, reconnectScheduler);
+        }, websocketConnectScheduler);
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交恢复公共频道操作任务,线程池可能已关闭: {}", e.getMessage());
+        } catch (Exception e) {
+            logger.error("恢复公共频道操作失败", e);
+        }
     }
 
     /**
      * 恢复私有频道的操作
      */
     private void restorePrivateOperations() {
-        CompletableFuture.runAsync(() -> {
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过恢复私有频道操作");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (reconnectScheduler.isShutdown() || reconnectScheduler.isTerminated()) {
+            logger.warn("重连调度器已关闭,无法恢复私有频道操作");
+            return;
+        }
+
+        try {
+            CompletableFuture.runAsync(() -> {
             logger.info("开始恢复私有频道订阅，共 {} 个待执行操作", privatePendingOperations.size());
 
             if (!privateConnected.get()) {
@@ -1086,13 +1181,31 @@ public class WebSocketUtil {
                 logger.error("发布WebSocket重连事件失败", e);
             }
         }, reconnectScheduler);
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交恢复私有频道操作任务,线程池可能已关闭: {}", e.getMessage());
+        } catch (Exception e) {
+            logger.error("恢复私有频道操作失败", e);
+        }
     }
 
     /**
      * 恢复业务频道的操作
      */
     private void restoreBusinessOperations() {
-        CompletableFuture.runAsync(() -> {
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过恢复业务频道操作");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (reconnectScheduler.isShutdown() || reconnectScheduler.isTerminated()) {
+            logger.warn("重连调度器已关闭,无法恢复业务频道操作");
+            return;
+        }
+
+        try {
+            CompletableFuture.runAsync(() -> {
             logger.info("开始恢复业务频道操作");
 
             if (!bussinessConnected.get()) {
@@ -1106,6 +1219,11 @@ public class WebSocketUtil {
 
             // 发布WebSocket重连事件（已在调用处处理）
         }, reconnectScheduler);
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交恢复业务频道操作任务,线程池可能已关闭: {}", e.getMessage());
+        } catch (Exception e) {
+            logger.error("恢复业务频道操作失败", e);
+        }
     }
 
     /**
@@ -1263,6 +1381,18 @@ public class WebSocketUtil {
      * 安排业务频道重连 - 优化版本
      */
     private void scheduleBusinessReconnect() {
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过业务频道重连");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (reconnectScheduler.isShutdown() || reconnectScheduler.isTerminated()) {
+            logger.warn("重连调度器已关闭,无法安排业务频道重连");
+            return;
+        }
+
         if (isCurrentlyReconnecting("business")) {
             debugLog("业务频道已在重连中，跳过本次重连请求");
             return;
@@ -1270,7 +1400,8 @@ public class WebSocketUtil {
 
         markReconnectStart("business");
 
-        reconnectScheduler.submit(() -> {
+        try {
+            reconnectScheduler.submit(() -> {
             try {
                 int currentRetry = businessRetryCount.getAndIncrement();
 
@@ -1338,12 +1469,31 @@ public class WebSocketUtil {
                 markReconnectEnd("business");
             }
         });
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交业务频道重连任务,线程池可能已关闭: {}", e.getMessage());
+            markReconnectEnd("business");
+        } catch (Exception e) {
+            logger.error("安排业务频道重连失败", e);
+            markReconnectEnd("business");
+        }
     }
 
     /**
      * 安排公共频道重连 - 优化版本
      */
     private void schedulePublicReconnect() {
+        // 检查应用是否正在关闭
+        if (isShuttingDown.get()) {
+            logger.info("应用正在关闭,跳过公共频道重连");
+            return;
+        }
+
+        // 检查线程池是否已关闭
+        if (reconnectScheduler.isShutdown() || reconnectScheduler.isTerminated()) {
+            logger.warn("重连调度器已关闭,无法安排公共频道重连");
+            return;
+        }
+
         if (isCurrentlyReconnecting("public")) {
             debugLog("公共频道已在重连中，跳过本次重连请求");
             return;
@@ -1351,7 +1501,8 @@ public class WebSocketUtil {
 
         markReconnectStart("public");
 
-        reconnectScheduler.submit(() -> {
+        try {
+            reconnectScheduler.submit(() -> {
             try {
                 int currentRetry = publicRetryCount.getAndIncrement();
 
@@ -1406,6 +1557,13 @@ public class WebSocketUtil {
                 markReconnectEnd("public");
             }
         });
+        } catch (RejectedExecutionException e) {
+            logger.warn("无法提交公共频道重连任务,线程池可能已关闭: {}", e.getMessage());
+            markReconnectEnd("public");
+        } catch (Exception e) {
+            logger.error("安排公共频道重连失败", e);
+            markReconnectEnd("public");
+        }
     }
 
     /**

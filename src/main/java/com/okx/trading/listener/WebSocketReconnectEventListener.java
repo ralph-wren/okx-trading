@@ -7,6 +7,7 @@ import com.okx.trading.strategy.RealTimeStrategyManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
@@ -21,6 +22,9 @@ import java.util.stream.Collectors;
 /**
  * WebSocket重连事件监听器
  * 处理WebSocket重连后的K线数据重新订阅
+ * 
+ * 注意: 只有当 kline.kafka.enabled=true 时才会重新订阅
+ * 如果 kline.kafka.enabled=false，数据来自 Kafka，不需要订阅 WebSocket
  */
 @Component
 public class WebSocketReconnectEventListener {
@@ -30,6 +34,9 @@ public class WebSocketReconnectEventListener {
     private final KlineCacheService klineCacheService;
     private final OkxApiService okxApiService;
     private final RealTimeStrategyManager realTimeStrategyManager;
+
+    @Value("${kline.kafka.enabled:false}")
+    private boolean klineKafkaEnabled;
 
     @Autowired
     public WebSocketReconnectEventListener(KlineCacheService klineCacheService,
@@ -42,11 +49,19 @@ public class WebSocketReconnectEventListener {
     /**
      * 处理WebSocket重连事件
      * 公共频道或业务频道重连时，重新订阅所有K线数据
+     * 
+     * 注意: 只有当 kline.kafka.enabled=true 时才会重新订阅
      */
     @EventListener
     @Async("websocketReconnectScheduler")
     public void handleWebSocketReconnect(WebSocketReconnectEvent event) {
-        log.info("收到WebSocket重连事件，重连类型: {}", event.getType());
+        log.info("收到WebSocket重连事件，重连类型: {}, kline.kafka.enabled={}", event.getType(), klineKafkaEnabled);
+
+        // 如果 Kafka 未启用，说明数据来自 Kafka，不需要订阅 WebSocket
+        if (!klineKafkaEnabled) {
+            log.info("kline.kafka.enabled=false，数据来自 Kafka，跳过 WebSocket 重新订阅");
+            return;
+        }
 
         try {
             // 公共频道和业务频道重连时都需要重新订阅K线数据

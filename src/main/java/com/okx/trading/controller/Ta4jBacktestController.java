@@ -51,7 +51,6 @@ public class Ta4jBacktestController {
     private final HistoricalDataService historicalDataService;
     private final Ta4jBacktestService ta4jBacktestService;
     private final BacktestTradeService backtestTradeService;
-    private final MarketDataService marketDataService;
     private final StrategyInfoService strategyInfoService;
     private final DeepSeekApiService deepSeekApiService;
     private final DynamicStrategyService dynamicStrategyService;
@@ -77,7 +76,6 @@ public class Ta4jBacktestController {
     public Ta4jBacktestController(HistoricalDataService historicalDataService,
                                   Ta4jBacktestService ta4jBacktestService,
                                   BacktestTradeService backtestTradeService,
-                                  MarketDataService marketDataService,
                                   StrategyInfoService strategyInfoService,
                                   DeepSeekApiService deepSeekApiService,
                                   DynamicStrategyService dynamicStrategyService,
@@ -97,7 +95,6 @@ public class Ta4jBacktestController {
         this.historicalDataService = historicalDataService;
         this.ta4jBacktestService = ta4jBacktestService;
         this.backtestTradeService = backtestTradeService;
-        this.marketDataService = marketDataService;
         this.strategyInfoService = strategyInfoService;
         this.deepSeekApiService = deepSeekApiService;
         this.dynamicStrategyService = dynamicStrategyService;
