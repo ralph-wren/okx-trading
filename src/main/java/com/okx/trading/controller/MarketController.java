@@ -10,14 +10,11 @@ import com.okx.trading.service.HistoricalDataService;
 import com.okx.trading.service.OkxApiService;
 import com.okx.trading.service.RedisCacheService;
 import com.okx.trading.service.KlineCacheService;
-import com.okx.trading.util.TechnicalIndicatorUtil;
 
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
@@ -32,17 +29,14 @@ import java.util.concurrent.TimeUnit;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import java.math.BigDecimal;
+
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
-import java.time.temporal.ChronoUnit;
-import java.util.Objects;
 
 import static com.okx.trading.constant.IndicatorInfo.ALL_COIN_RT_PRICE;
-import static com.okx.trading.util.BacktestDataGenerator.parseIntervalToMinutes;
 
 /**
  * 市场数据控制器
